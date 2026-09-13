@@ -1,5 +1,5 @@
 from flask import Flask, render_template_string, request, redirect, url_for, jsonify
-import psycopg2
+import psycopg
 import os
 import base64
 import requests
@@ -16,8 +16,8 @@ GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 
 def get_db_connection():
-    # รองรับการเชื่อมต่อผ่าน PostgreSQL URL บน Render
-    conn = psycopg2.connect(DATABASE_URL)
+    # ใช้ psycopg เวอร์ชัน 3 สำหรับเชื่อมต่อ PostgreSQL
+    conn = psycopg.connect(DATABASE_URL)
     return conn
 
 def init_db():
@@ -369,7 +369,6 @@ def add_item():
         base, ext = os.path.splitext(filename)
         counter = 1
         
-        # ตรวจสอบชื่อซ้ำและสร้างชื่อใหม่ผ่าน GitHub API
         while True:
             check_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
             headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
