@@ -15,45 +15,56 @@ GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 
 def download_db_from_github():
-    """ ดาวน์โหลดฐานข้อมูลจาก GitHub มาไว้ที่เซิร์ฟเวอร์ชั่วคราวตอนเริ่มระบบ """
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-    res = requests.get(api_url, headers=headers)
-    if res.status_code == 200:
-        file_data = res.json()
-        if 'content' in file_data:
-            file_bytes = base64.b64decode(file_data['content'])
-            with open(DB_NAME, 'wb') as f:
-                f.write(file_bytes)
+    """ พยายามดาวน์โหลดฐานข้อมูลล่าสุดจาก GitHub มาไว้ที่เซิร์ฟเวอร์ """
+    try:
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
+        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+        res = requests.get(api_url, headers=headers)
+        if res.status_code == 200:
+            file_data = res.json()
+            if 'content' in file_data:
+                file_bytes = base64.b64decode(file_data['content'])
+                with open(DB_NAME, 'wb') as f:
+                    f.write(file_bytes)
+                print("ดาวน์โหลดฐานข้อมูลจาก GitHub สำเร็จ")
+    except Exception as e:
+        print(f"ไม่สามารถดาวน์โหลด DB ได้ (ใช้ไฟล์ท้องถิ่นแทน): {e}")
 
 def upload_db_to_github():
-    """ อัปโหลดฐานข้อมูลล่าสุดขึ้น GitHub เพื่อความปลอดภัยไม่ให้ข้อมูลหาย """
-    if not os.path.exists(DB_NAME):
-        return
-    
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-    
-    # ดึง SHA เดิมก่อน (จำเป็นต้องใช้ในการอัปเดตไฟล์เดิมบน GitHub)
-    res = requests.get(api_url, headers=headers)
-    sha = res.json().get('sha') if res.status_code == 200 else None
-    
-    with open(DB_NAME, 'rb') as f:
-        file_bytes = f.read()
-    
-    encoded_content = base64.b64encode(file_bytes).decode('utf-8')
-    payload = {
-        "message": "Update database storage.db",
-        "content": encoded_content,
-        "branch": GITHUB_BRANCH
-    }
-    if sha:
-        payload["sha"] = sha
+    """ บันทึกและอัปโหลดฐานข้อมูลล่าสุดขึ้น GitHub ทันที เพื่อป้องกันข้อมูลหาย """
+    try:
+        if not os.path.exists(DB_NAME):
+            return
         
-    requests.put(api_url, headers=headers, json=payload)
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
+        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+        
+        # ดึง SHA เดิมของไฟล์บน GitHub (จำเป็นสำหรับการอัปเดตไฟล์เดิม)
+        res = requests.get(api_url, headers=headers)
+        sha = res.json().get('sha') if res.status_code == 200 else None
+        
+        with open(DB_NAME, 'rb') as f:
+            file_bytes = f.read()
+        
+        encoded_content = base64.b64encode(file_bytes).decode('utf-8')
+        payload = {
+            "message": "Auto-backup database storage.db",
+            "content": encoded_content,
+            "branch": GITHUB_BRANCH
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        put_res = requests.put(api_url, headers=headers, json=payload)
+        if put_res.status_code in [200, 201]:
+            print("สำรองข้อมูลฐานข้อมูลขึ้น GitHub สำเร็จ!")
+        else:
+            print(f"สำรองฐานข้อมูลไม่สำเร็จ: {put_res.text}")
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการอัปโหลด DB: {e}")
 
 def init_db():
-    # ดึงฐานข้อมูลล่าสุดจาก GitHub ก่อนเริ่มเสมอ
+    # ดึงข้อมูลล่าสุดจาก GitHub ก่อนเสมอ
     download_db_from_github()
     
     conn = sqlite3.connect(DB_NAME)
@@ -84,7 +95,7 @@ def init_db():
     conn.commit()
     conn.close()
     
-    # อัปโหลดฐานข้อมูลเริ่มต้นขึ้น GitHub เผื่อยังไม่มี
+    # อัปโหลดสถานะฐานข้อมูลเริ่มแรกขึ้น GitHub เผื่อยังไม่เคยมี
     upload_db_to_github()
 
 HTML_TEMPLATE = '''
@@ -383,10 +394,14 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
+# เรียกใช้งานฟังก์ชันตั้งค่าฐานข้อมูลตอนเริ่มต้น
 init_db()
 
 @app.route('/')
 def index():
+    # ดึงฐานข้อมูลล่าสุดมาแสดงผลทุกครั้งที่มีการรีเฟรชหน้าเว็บ
+    download_db_from_github()
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
@@ -437,7 +452,7 @@ def add_item():
         conn.commit()
         conn.close()
         
-        # อัปเดตฐานข้อมูลขึ้น GitHub ทันทีเมื่อมีการเพิ่มข้อมูล
+        # อัปโหลดฐานข้อมูลขึ้น GitHub ทันทีเมื่อเพิ่มข้อมูลสำเร็จ
         upload_db_to_github()
 
     return redirect(url_for('index'))
@@ -484,7 +499,7 @@ def delete_item(item_id):
     conn.commit()
     conn.close()
     
-    # อัปเดตฐานข้อมูลขึ้น GitHub ทันทีเมื่อมีการลบข้อมูล
+    # อัปโหลดฐานข้อมูลขึ้น GitHub ทันทีเมื่อลบข้อมูลสำเร็จ
     upload_db_to_github()
 
     return redirect(url_for('index'))
@@ -500,7 +515,7 @@ def update_title():
         conn.commit()
         conn.close()
         
-        # อัปเดตฐานข้อมูลขึ้น GitHub เมื่อเปลี่ยนชื่อระบบ
+        # อัปโหลดฐานข้อมูลขึ้น GitHub ทันทีเมื่อเปลี่ยนชื่อระบบ
         upload_db_to_github()
 
         return jsonify({'status': 'success'})
