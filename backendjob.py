@@ -1,8 +1,9 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify, send_file
 import sqlite3
 import os
 import base64
 import requests
+import io
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -396,9 +397,21 @@ def add_item():
 
 @app.route('/uploads/<filename>')
 def download_file(filename):
-    # ดึงไฟล์โดยตรงจาก Raw GitHub URL เพื่อให้ดาวน์โหลดได้ทันที
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/uploads/{filename}"
-    return redirect(raw_url)
+    # ดึงไฟล์ผ่าน GitHub API โดยใช้ Token เพื่อรองรับ Private Repo ได้อย่างสมบูรณ์
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+    
+    res = requests.get(api_url, headers=headers)
+    if res.status_code == 200:
+        file_data = res.json()
+        if 'content' in file_data:
+            file_bytes = base64.b64decode(file_data['content'])
+            return send_file(
+                io.BytesIO(file_bytes),
+                download_name=filename,
+                as_attachment=True
+            )
+    return "ไม่พบไฟล์ หรือ Token ไม่มีสิทธิ์เข้าถึง", 404
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
