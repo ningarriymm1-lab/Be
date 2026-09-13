@@ -19,34 +19,38 @@ GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 
 def get_db_connection():
-    # ใช้ psycopg เวอร์ชัน 3 สำหรับเชื่อมต่อ PostgreSQL
+    if not DATABASE_URL:
+        raise ValueError("❌ ยังไม่ได้ตั้งค่า DATABASE_URL ใน Environment Variables ของ Render โปรดเพิ่มตัวแปรนี้ในแดชบอร์ด Render ก่อน")
     conn = psycopg.connect(DATABASE_URL)
     return conn
 
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS items (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            filename TEXT
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-    cursor.execute("INSERT INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน') ON CONFLICT (key) DO NOTHING")
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS items (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                filename TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        cursor.execute("INSERT INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน') ON CONFLICT (key) DO NOTHING")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ คำเตือนตอนเชื่อมต่อฐานข้อมูล: {e}")
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -348,16 +352,23 @@ init_db()
 
 @app.route('/')
 def index():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
-    row = cursor.fetchone()
-    system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
+    system_title = 'ระบบเก็บข้อมูลของฉัน'
+    items = []
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
+        row = cursor.fetchone()
+        if row:
+            system_title = row[0]
+        
+        cursor.execute("SELECT id, name, category, filename FROM items ORDER BY id DESC")
+        items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3]} for r in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error loading index: {e}")
     
-    cursor.execute("SELECT id, name, category, filename FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3]} for r in cursor.fetchall()]
-    cursor.close()
-    conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
 @app.route('/add', methods=['POST'])
