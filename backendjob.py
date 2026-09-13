@@ -7,6 +7,9 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
+# ดึงค่าพอร์ตจาก Render (ถ้าไม่มีให้ใช้ 5000 สำหรับรันบนเครื่องตัวเอง)
+PORT = int(os.environ.get("PORT", 5000))
+
 # ดึงค่าเชื่อมต่อ Database จาก Render Environment Variables
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -445,4 +448,4 @@ def update_title():
     return jsonify({'status': 'error'}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=PORT, debug=True)
