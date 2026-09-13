@@ -7,50 +7,44 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# ดึงค่าพอร์ตจาก Render (ถ้าไม่มีให้ใช้ 5000 สำหรับรันบนเครื่องตัวเอง)
 PORT = int(os.environ.get("PORT", 5000))
-
-# ดึงค่าเชื่อมต่อ Database จาก Render Environment Variables
 DATABASE_URL = os.environ.get('DATABASE_URL')
-
-# กำหนดค่า GitHub API สำหรับเก็บไฟล์
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 
 def get_db_connection():
     if not DATABASE_URL:
-        raise ValueError("❌ ยังไม่ได้ตั้งค่า DATABASE_URL ใน Environment Variables ของ Render โปรดเพิ่มตัวแปรนี้ในแดชบอร์ด Render ก่อน")
-    conn = psycopg.connect(DATABASE_URL)
-    return conn
+        raise ValueError("❌ ยังไม่ได้ตั้งค่า DATABASE_URL ใน Environment Variables ของ Render")
+    return psycopg.connect(DATABASE_URL)
 
 def init_db():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS items (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                filename TEXT
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        ''')
-        cursor.execute("INSERT INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน') ON CONFLICT (key) DO NOTHING")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        print(f"⚠️ คำเตือนตอนเชื่อมต่อฐานข้อมูล: {e}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS items (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            filename TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+    cursor.execute("INSERT INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน') ON CONFLICT (key) DO NOTHING")
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+# รันสร้างตารางทันทีตอนเริ่มแอป
+try:
+    init_db()
+except Exception as e:
+    print(f"Database Init Error: {e}")
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -62,128 +56,62 @@ HTML_TEMPLATE = '''
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #121212;
-            --bg-card: #1E1F22;
-            --bg-card-hover: #2B2D31;
-            --text-main: #E3E3E3;
-            --text-sub: #9E9E9E;
-            --accent: #A4C8F0;
-            --accent-hover: #8AB8EC;
-            --border: #2D2F31;
-            --danger: #F28B82;
+            --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
+            --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
+            --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
         }
-
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
         header { margin-bottom: 20px; }
         h1 { font-size: 28px; font-weight: 700; color: #FFFFFF; margin-bottom: 5px; }
-        
-        .editable-title {
-            background: transparent; border: 1px dashed transparent; color: var(--text-sub);
-            font-size: 15px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s;
-        }
-        .editable-title:hover, .editable-title:focus {
-            background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none;
-        }
-
-        .toolbar {
-            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
-            gap: 12px; margin-bottom: 20px; background-color: var(--bg-card); padding: 12px 16px;
-            border-radius: 12px; border: 1px solid var(--border);
-        }
+        .editable-title { background: transparent; border: 1px dashed transparent; color: var(--text-sub); font-size: 15px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s; }
+        .editable-title:hover, .editable-title:focus { background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none; }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; background-color: var(--bg-card); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--border); }
         .toolbar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
         .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-        .tab-btn {
-            background: transparent; border: none; color: var(--text-sub); padding: 7px 12px;
-            border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s;
-        }
+        .tab-btn { background: transparent; border: none; color: var(--text-sub); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
         .tab-btn:hover { color: var(--text-main); background: var(--bg-card-hover); }
         .tab-btn.active { background-color: var(--accent); color: #121212; font-weight: 600; }
-
         .actions { display: flex; gap: 10px; align-items: center; width: 100%; justify-content: space-between; }
-        @media (min-width: 600px) {
-            .actions { width: auto; }
-        }
-        .search-box {
-            background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main);
-            padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; flex: 1; max-width: 200px;
-        }
+        @media (min-width: 600px) { .actions { width: auto; } }
+        .search-box { background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; flex: 1; max-width: 200px; }
         .search-box:focus { border-color: var(--accent); }
-
-        .btn-primary {
-            background-color: var(--accent); color: #121212; border: none; padding: 9px 16px;
-            border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none;
-            transition: transform 0.1s, background-color 0.2s; white-space: nowrap; font-size: 14px;
-        }
+        .btn-primary { background-color: var(--accent); color: #121212; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none; transition: transform 0.1s, background-color 0.2s; white-space: nowrap; font-size: 14px; }
         .btn-primary:hover { background-color: var(--accent-hover); }
-        .btn-primary:active { transform: scale(0.97); }
-
-        .grid-container { 
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr); 
-            gap: 12px; 
-        }
-        @media (min-width: 640px) {
-            .grid-container { 
-                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
-                gap: 20px; 
-            }
-        }
-
-        .card {
-            background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-            padding: 12px; position: relative; transition: transform 0.2s, border-color 0.2s;
-            display: flex; flex-direction: column; align-items: center; text-align: center;
-        }
-        .card:hover { transform: translateY(-3px); border-color: var(--accent); }
+        .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        @media (min-width: 640px) { .grid-container { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; } }
+        .card { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
         .card-icon { font-size: 32px; margin-bottom: 8px; height: 50px; display: flex; align-items: center; justify-content: center; }
         .card-title { font-size: 14px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 11px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 10px; }
-        
         .card-actions { display: flex; gap: 6px; width: 100%; margin-top: auto; }
-        .card-btn { padding: 5px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none;}
+        .card-btn { padding: 5px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; text-align: center; text-decoration: none; }
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
         .btn-download:hover { background: var(--accent); color: #121212; }
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
-
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
-
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
         .modal.active { display: flex; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border); padding: 24px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .modal-content h3 { margin-bottom: 16px; color: #fff; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        
+        .modal-content h3 { margin-bottom: 16px; color: #fff; font-size: 18px; font-weight: 600; }
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 6px; font-weight: 500; }
-        .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
-        .form-control:focus { border-color: var(--accent); }
-
-        .file-drop-area {
-            border: 2px dashed var(--border); border-radius: 10px; padding: 18px; text-align: center;
-            background: var(--bg-main); cursor: pointer; transition: all 0.2s ease; position: relative;
-        }
-        .file-drop-area:hover { border-color: var(--accent); background: rgba(164, 200, 240, 0.03); }
-        .file-drop-area input[type="file"] {
-            position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
-        }
+        .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; }
+        .file-drop-area { border: 2px dashed var(--border); border-radius: 10px; padding: 18px; text-align: center; background: var(--bg-main); cursor: pointer; position: relative; }
+        .file-drop-area input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
         .file-msg { font-size: 13px; color: var(--text-sub); pointer-events: none; }
-        .file-msg span { color: var(--accent); font-weight: 500; }
-
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; font-size: 14px; }
-        .btn-secondary:hover { background: var(--bg-card-hover); }
+        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; }
     </style>
 </head>
 <body>
-
     <div class="container">
         <header>
             <h1>ระบบเก็บข้อมูล</h1>
             <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
         </header>
-
         <div class="toolbar">
             <div class="toolbar-left">
                 <div class="tabs">
@@ -196,13 +124,9 @@ HTML_TEMPLATE = '''
             </div>
             <div class="actions">
                 <input type="text" id="searchInput" class="search-box" placeholder="ค้นหาข้อมูล..." oninput="handleSearch()">
-                <button class="btn-primary" onclick="openModal()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    เพิ่มข้อมูล
-                </button>
+                <button class="btn-primary" onclick="openModal()">เพิ่มข้อมูล</button>
             </div>
         </div>
-
         <div class="grid-container" id="itemGrid">
             {% for item in items %}
             <div class="card item-card" data-category="{{ item.category }}" data-name="{{ item.name | lower }}">
@@ -213,53 +137,44 @@ HTML_TEMPLATE = '''
                     {% else %}📁{% endif %}
                 </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
-                <div class="card-category">
-                    {% if item.category == 'image' %}รูปภาพ
-                    {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
-                    {% elif item.category == 'drive' %}ไดรฟ์
-                    {% else %}ไฟล์ทั่วไป{% endif %}
-                </div>
+                <div class="card-category">{{ item.category }}</div>
                 <div class="card-actions">
                     {% if item.filename %}
                     <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
                     {% endif %}
-                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
+                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ลบข้อมูลนี้หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
                     </form>
                 </div>
             </div>
             {% endfor %}
-            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูลในเงื่อนไขที่คุณค้นหา</div>
+            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูล</div>
         </div>
     </div>
-
     <div class="modal" id="addModal">
         <div class="modal-content">
-            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์จากมือถือ</h3>
+            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
             <form action="{{ url_for('add_item') }}" method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label>ชื่อที่แสดง</label>
-                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="เช่น โฟลเดอร์งาน หรือ ไฟล์ซิปรวม">
+                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="ชื่อข้อมูล">
                 </div>
                 <div class="form-group">
                     <label>หมวดหมู่</label>
                     <select name="category" id="itemCategory" class="form-control">
                         <option value="file">📁 ไฟล์ทั่วไป</option>
-                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
+                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์</option>
                         <option value="image">🖼️ รูปภาพ</option>
                         <option value="drive">💽 ไดรฟ์ / ลิงก์</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>เลือกไฟล์จากเครื่องมือถือ (รองรับทุกไฟล์)</label>
-                    <div class="file-drop-area" id="dropArea">
+                    <label>เลือกไฟล์</label>
+                    <div class="file-drop-area">
                         <input type="file" name="file" id="fileInput" accept="*/*" required onchange="handleFileSelect(this)">
-                        <div class="file-msg" id="fileMsg">
-                            📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป
-                        </div>
+                        <div class="file-msg" id="fileMsg">📱 แตะเลือกไฟล์ที่นี่</div>
                     </div>
                 </div>
-
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
                     <button type="submit" class="btn-primary">อัปโหลด</button>
@@ -267,88 +182,38 @@ HTML_TEMPLATE = '''
             </form>
         </div>
     </div>
-
     <script>
         let currentCategory = 'all';
-
-        const titleInput = document.getElementById('systemTitleInput');
-        let timeout = null;
-        titleInput.addEventListener('input', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                fetch('/update_title', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: titleInput.value })
-                });
-            }, 500);
-        });
-
         function handleFileSelect(input) {
-            const fileMsg = document.getElementById('fileMsg');
-            const nameInput = document.getElementById('itemName');
-            const categorySelect = document.getElementById('itemCategory');
-            
             if (input.files && input.files.length > 0) {
-                const fileName = input.files[0].name;
-                const lowerName = fileName.toLowerCase();
-                fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
-                
-                if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z') || lowerName.endsWith('.tar')) {
-                    categorySelect.value = 'zip';
-                } else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.gif') || lowerName.endsWith('.webp')) {
-                    categorySelect.value = 'image';
+                document.getElementById('fileMsg').innerHTML = `✅ เลือกแล้ว: ${input.files[0].name}`;
+                if(!document.getElementById('itemName').value) {
+                    document.getElementById('itemName').value = input.files[0].name.substring(0, input.files[0].name.lastIndexOf('.')) || input.files[0].name;
                 }
-
-                if (!nameInput.value.trim()) {
-                    const cleanName = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
-                    nameInput.value = cleanName;
-                }
-            } else {
-                fileMsg.innerHTML = `📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป`;
             }
         }
-
-        function filterCategory(category, btnElement) {
-            currentCategory = category;
+        function filterCategory(cat, btn) {
+            currentCategory = cat;
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btnElement.classList.add('active');
+            btn.classList.add('active');
             handleSearch();
         }
-
         function handleSearch() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const cards = document.querySelectorAll('.item-card');
-            let visibleCount = 0;
-
-            cards.forEach(card => {
-                const cat = card.getAttribute('data-category');
-                const name = card.getAttribute('data-name');
-                const matchCategory = currentCategory === 'all' || cat === currentCategory;
-                const matchQuery = name.includes(query);
-
-                if (matchCategory && matchQuery) {
-                    card.style.display = 'flex';
-                    visibleCount++;
-                } else {
-                    card.style.display = 'none';
-                }
+            let q = document.getElementById('searchInput').value.toLowerCase();
+            let count = 0;
+            document.querySelectorAll('.item-card').forEach(card => {
+                let match = (currentCategory === 'all' || card.dataset.category === currentCategory) && card.dataset.name.includes(q);
+                card.style.display = match ? 'flex' : 'none';
+                if(match) count++;
             });
-
-            document.getElementById('emptyState').style.display = visibleCount === 0 ? 'block' : 'none';
+            document.getElementById('emptyState').style.display = count === 0 ? 'block' : 'none';
         }
-
         function openModal() { document.getElementById('addModal').classList.add('active'); }
-        function closeModal() { 
-            document.getElementById('addModal').classList.remove('active');
-            document.getElementById('fileMsg').innerHTML = `📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป`;
-        }
+        function closeModal() { document.getElementById('addModal').classList.remove('active'); }
     </script>
 </body>
 </html>
 '''
-
-init_db()
 
 @app.route('/')
 def index():
@@ -359,16 +224,13 @@ def index():
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
         row = cursor.fetchone()
-        if row:
-            system_title = row[0]
-        
+        if row: system_title = row[0]
         cursor.execute("SELECT id, name, category, filename FROM items ORDER BY id DESC")
         items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3]} for r in cursor.fetchall()]
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"Error loading index: {e}")
-    
+        print(f"Index Error: {e}")
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
 @app.route('/add', methods=['POST'])
@@ -376,72 +238,71 @@ def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
     file = request.files.get('file')
-    
     filename = None
-    if file and file.filename != '':
-        filename = secure_filename(file.filename)
-        base, ext = os.path.splitext(filename)
-        counter = 1
-        
-        while True:
-            check_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+
+    try:
+        if file and file.filename != '':
+            filename = secure_filename(file.filename)
+            base, ext = os.path.splitext(filename)
+            counter = 1
             headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-            res = requests.get(check_url, headers=headers)
-            if res.status_code == 404:
-                break
-            filename = f"{base}_{counter}{ext}"
-            counter += 1
 
-        file_bytes = file.read()
-        encoded_content = base64.b64encode(file_bytes).decode('utf-8')
-        
-        upload_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
-        payload = {
-            "message": f"Upload {filename} via Web App",
-            "content": encoded_content,
-            "branch": GITHUB_BRANCH
-        }
-        requests.put(upload_url, headers=headers, json=payload)
+            while True:
+                check_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+                res = requests.get(check_url, headers=headers)
+                if res.status_code == 404:
+                    break
+                filename = f"{base}_{counter}{ext}"
+                counter += 1
 
-    if name:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, filename) VALUES (%s, %s, %s)", (name, category, filename))
-        conn.commit()
-        cursor.close()
-        conn.close()
+            file_bytes = file.read()
+            encoded_content = base64.b64encode(file_bytes).decode('utf-8')
+            upload_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+            payload = {
+                "message": f"Upload {filename} via Web App",
+                "content": encoded_content,
+                "branch": GITHUB_BRANCH
+            }
+            requests.put(upload_url, headers=headers, json=payload)
+
+        if name:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO items (name, category, filename) VALUES (%s, %s, %s)", (name, category, filename))
+            conn.commit()
+            cursor.close()
+            conn.close()
+    except Exception as e:
+        print(f"Add Item Error: {e}")
+        return f"เกิดข้อผิดพลาดในการเพิ่มข้อมูล: {e}", 500
+
     return redirect(url_for('index'))
 
 @app.route('/uploads/<filename>')
 def download_file(filename):
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/uploads/{filename}"
-    return redirect(raw_url)
+    return redirect(f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/uploads/{filename}")
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT filename FROM items WHERE id = %s", (item_id,))
-    row = cursor.fetchone()
-    if row and row[0]:
-        filename = row[0]
-        file_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
-        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        
-        res = requests.get(file_url, headers=headers)
-        if res.status_code == 200:
-            file_sha = res.json().get('sha')
-            delete_payload = {
-                "message": f"Delete {filename} via Web App",
-                "sha": file_sha,
-                "branch": GITHUB_BRANCH
-            }
-            requests.delete(file_url, headers=headers, json=delete_payload)
-            
-    cursor.execute("DELETE FROM items WHERE id = %s", (item_id,))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename FROM items WHERE id = %s", (item_id,))
+        row = cursor.fetchone()
+        if row and row[0]:
+            filename = row[0]
+            file_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+            headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+            res = requests.get(file_url, headers=headers)
+            if res.status_code == 200:
+                sha = res.json().get('sha')
+                requests.delete(file_url, headers=headers, json={"message": f"Delete {filename}", "sha": sha, "branch": GITHUB_BRANCH})
+        cursor.execute("DELETE FROM items WHERE id = %s", (item_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Delete Error: {e}")
     return redirect(url_for('index'))
 
 @app.route('/update_title', methods=['POST'])
