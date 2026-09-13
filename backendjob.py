@@ -1,13 +1,17 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify
 import sqlite3
 import os
+import base64
+import requests
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 DB_NAME = 'storage.db'
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# ดึงค่า GitHub Secrets จาก Render Environment Variables
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")  # เช่น 'ningarriymm1-lab/Be'
+GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -18,14 +22,18 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            filename TEXT
+            filename TEXT,
+            file_url TEXT
         )
     ''')
     
+    # อัปเกรดโครงสร้างตารางเผื่อกรณีฐานข้อมูลเก่าไม่มีคอลัมน์ file_url
     cursor.execute("PRAGMA table_info(items)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'filename' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN filename TEXT")
+    if 'file_url' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN file_url TEXT")
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
@@ -37,6 +45,71 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def upload_file_to_github(file_obj, filename):
+    """ฟังก์ชันสำหรับอัปโหลดไฟล์ตรงขึ้น GitHub Repository ผ่าน GitHub API"""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        print("Error: ยังไม่ได้ตั้งค่า GITHUB_TOKEN หรือ GITHUB_REPO บน Environment Variables")
+        return None
+    
+    try:
+        file_content = file_obj.read()
+        encoded_content = base64.b64encode(file_content).decode('utf-8')
+        
+        # จัดเก็บไฟล์ไว้ในโฟลเดอร์ uploads บน GitHub
+        github_path = f"uploads/{filename}"
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{github_path}"
+        
+        headers = {
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json"
+        }
+        
+        payload = {
+            "message": f"Upload file {filename} via web app",
+            "content": encoded_content,
+            "branch": GITHUB_BRANCH
+        }
+        
+        response = requests.put(url, json=payload, headers=headers)
+        
+        if response.status_code in [200, 201]:
+            # คืนค่าเป็น Raw URL สำหรับดาวน์โหลดไฟล์ตรงจาก GitHub
+            raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/uploads/{filename}"
+            return raw_url
+        else:
+            print(f"GitHub API Error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error uploading to GitHub: {e}")
+        return None
+
+def delete_file_from_github(filename):
+    """ฟังก์ชันสำหรับลบไฟล์ออกจาก GitHub Repository"""
+    if not GITHUB_TOKEN or not GITHUB_REPO or not filename:
+        return
+    
+    try:
+        github_path = f"uploads/{filename}"
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{github_path}"
+        
+        headers = {
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json"
+        }
+        
+        # ต้องดึง SHA ของไฟล์บน GitHub ก่อนทำการลบ
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            file_sha = res.json().get("sha")
+            payload = {
+                "message": f"Delete file {filename} via web app",
+                "sha": file_sha,
+                "branch": GITHUB_BRANCH
+            }
+            requests.delete(url, json=payload, headers=headers)
+    except Exception as e:
+        print(f"Error deleting from GitHub: {e}")
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -58,13 +131,11 @@ HTML_TEMPLATE = '''
             --border: #2D2F31;
             --danger: #F28B82;
         }
-
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
         header { margin-bottom: 20px; }
         h1 { font-size: 28px; font-weight: 700; color: #FFFFFF; margin-bottom: 5px; }
-        
         .editable-title {
             background: transparent; border: 1px dashed transparent; color: var(--text-sub);
             font-size: 15px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s;
@@ -72,7 +143,6 @@ HTML_TEMPLATE = '''
         .editable-title:hover, .editable-title:focus {
             background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none;
         }
-
         .toolbar {
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
             gap: 12px; margin-bottom: 20px; background-color: var(--bg-card); padding: 12px 16px;
@@ -86,17 +156,13 @@ HTML_TEMPLATE = '''
         }
         .tab-btn:hover { color: var(--text-main); background: var(--bg-card-hover); }
         .tab-btn.active { background-color: var(--accent); color: #121212; font-weight: 600; }
-
         .actions { display: flex; gap: 10px; align-items: center; width: 100%; justify-content: space-between; }
-        @media (min-width: 600px) {
-            .actions { width: auto; }
-        }
+        @media (min-width: 600px) { .actions { width: auto; } }
         .search-box {
             background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main);
             padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; flex: 1; max-width: 200px;
         }
         .search-box:focus { border-color: var(--accent); }
-
         .btn-primary {
             background-color: var(--accent); color: #121212; border: none; padding: 9px 16px;
             border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none;
@@ -104,19 +170,8 @@ HTML_TEMPLATE = '''
         }
         .btn-primary:hover { background-color: var(--accent-hover); }
         .btn-primary:active { transform: scale(0.97); }
-
-        .grid-container { 
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr); 
-            gap: 12px; 
-        }
-        @media (min-width: 640px) {
-            .grid-container { 
-                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
-                gap: 20px; 
-            }
-        }
-
+        .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        @media (min-width: 640px) { .grid-container { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; } }
         .card {
             background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
             padding: 12px; position: relative; transition: transform 0.2s, border-color 0.2s;
@@ -126,44 +181,34 @@ HTML_TEMPLATE = '''
         .card-icon { font-size: 32px; margin-bottom: 8px; height: 50px; display: flex; align-items: center; justify-content: center; }
         .card-title { font-size: 14px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 11px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 10px; }
-        
         .card-actions { display: flex; gap: 6px; width: 100%; margin-top: auto; }
         .card-btn { padding: 5px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none;}
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
         .btn-download:hover { background: var(--accent); color: #121212; }
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
-
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
-
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
         .modal.active { display: flex; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border); padding: 24px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .modal-content h3 { margin-bottom: 16px; color: #fff; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 6px; font-weight: 500; }
         .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
         .form-control:focus { border-color: var(--accent); }
-
         .file-drop-area {
             border: 2px dashed var(--border); border-radius: 10px; padding: 18px; text-align: center;
             background: var(--bg-main); cursor: pointer; transition: all 0.2s ease; position: relative;
         }
         .file-drop-area:hover { border-color: var(--accent); background: rgba(164, 200, 240, 0.03); }
-        .file-drop-area input[type="file"] {
-            position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
-        }
+        .file-drop-area input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
         .file-msg { font-size: 13px; color: var(--text-sub); pointer-events: none; }
-        .file-msg span { color: var(--accent); font-weight: 500; }
-
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; font-size: 14px; }
         .btn-secondary:hover { background: var(--bg-card-hover); }
     </style>
 </head>
 <body>
-
     <div class="container">
         <header>
             <h1>ระบบเก็บข้อมูล</h1>
@@ -206,8 +251,8 @@ HTML_TEMPLATE = '''
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
                 <div class="card-actions">
-                    {% if item.filename %}
-                    <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
+                    {% if item.file_url %}
+                    <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
                     {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
@@ -240,12 +285,9 @@ HTML_TEMPLATE = '''
                     <label>เลือกไฟล์จากเครื่องมือถือ (รองรับทุกไฟล์)</label>
                     <div class="file-drop-area" id="dropArea">
                         <input type="file" name="file" id="fileInput" accept="*/*" required onchange="handleFileSelect(this)">
-                        <div class="file-msg" id="fileMsg">
-                            📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป
-                        </div>
+                        <div class="file-msg" id="fileMsg">📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป</div>
                     </div>
                 </div>
-
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
                     <button type="submit" class="btn-primary">อัปโหลด</button>
@@ -256,7 +298,6 @@ HTML_TEMPLATE = '''
 
     <script>
         let currentCategory = 'all';
-
         const titleInput = document.getElementById('systemTitleInput');
         let timeout = null;
         titleInput.addEventListener('input', () => {
@@ -320,7 +361,6 @@ HTML_TEMPLATE = '''
                     card.style.display = 'none';
                 }
             });
-
             document.getElementById('emptyState').style.display = visibleCount === 0 ? 'block' : 'none';
         }
 
@@ -344,8 +384,8 @@ def index():
     row = cursor.fetchone()
     system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
     
-    cursor.execute("SELECT id, name, category, filename FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3]} for r in cursor.fetchall()]
+    cursor.execute("SELECT id, name, category, filename, file_url FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3], 'file_url': r[4]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
@@ -356,28 +396,33 @@ def add_item():
     file = request.files.get('file')
     
     filename = None
+    file_url = None
     if file and file.filename != '':
         filename = secure_filename(file.filename)
         base, ext = os.path.splitext(filename)
         counter = 1
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        while os.path.exists(filepath):
+        
+        # ป้องกันชื่อไฟล์ซ้ำบน GitHub
+        conn_check = sqlite3.connect(DB_NAME)
+        cur_check = conn_check.cursor()
+        while True:
+            cur_check.execute("SELECT id FROM items WHERE filename = ?", (filename,))
+            if not cur_check.fetchone():
+                break
             filename = f"{base}_{counter}{ext}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             counter += 1
-        file.save(filepath)
+        conn_check.close()
+        
+        # อัปโหลดไฟล์ขึ้น GitHub ตรงๆ
+        file_url = upload_file_to_github(file, filename)
 
     if name:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, filename) VALUES (?, ?, ?)", (name, category, filename))
+        cursor.execute("INSERT INTO items (name, category, filename, file_url) VALUES (?, ?, ?, ?)", (name, category, filename, file_url))
         conn.commit()
         conn.close()
     return redirect(url_for('index'))
-
-@app.route('/uploads/<filename>')
-def download_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
@@ -386,9 +431,8 @@ def delete_item(item_id):
     cursor.execute("SELECT filename FROM items WHERE id = ?", (item_id,))
     row = cursor.fetchone()
     if row and row[0]:
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], row[0])
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        # ลบไฟล์ออกจาก GitHub
+        delete_file_from_github(row[0])
             
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
