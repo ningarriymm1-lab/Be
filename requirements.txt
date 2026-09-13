@@ -1,5 +1,5 @@
-Flask
-gunicorn
-psycopg[binary]
-requests
-Werkzeug
+Flask==3.1.0
+gunicorn==23.0.0
+psycopg[binary]==3.2.4
+requests==2.32.3
+Werkzeug==3.1.3
