@@ -188,7 +188,6 @@ HTML_TEMPLATE = '''
                     <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
                     <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
                     <button class="tab-btn" onclick="filterCategory('video', this)">🎬 วิดีโอ</button>
-                    <button class="tab-btn" onclick="filterCategory('drive', this)">💽 ไดรฟ์</button>
                 </div>
             </div>
             <div class="actions">
@@ -204,7 +203,6 @@ HTML_TEMPLATE = '''
                     {% if item.category == 'image' %}🖼️
                     {% elif item.category == 'zip' %}📦
                     {% elif item.category == 'video' %}🎬
-                    {% elif item.category == 'drive' %}💽
                     {% else %}📁{% endif %}
                 </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
@@ -212,7 +210,6 @@ HTML_TEMPLATE = '''
                     {% if item.category == 'image' %}รูปภาพ
                     {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
                     {% elif item.category == 'video' %}วิดีโอ
-                    {% elif item.category == 'drive' %}ไดรฟ์
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
                 <div class="card-actions">
@@ -247,7 +244,6 @@ HTML_TEMPLATE = '''
                         <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
                         <option value="image">🖼️ รูปภาพ</option>
                         <option value="video">🎬 วิดีโอ</option>
-                        <option value="drive">💽 ไดรฟ์ / ลิงก์</option>
                     </select>
                 </div>
                 <div class="form-group">
