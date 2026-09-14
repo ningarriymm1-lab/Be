@@ -3,6 +3,7 @@ import sqlite3
 import os
 import base64
 import requests
+import uuid
 
 app = Flask(__name__)
 DB_NAME = 'storage.db'
@@ -142,8 +143,6 @@ HTML_TEMPLATE = '''
         .card-btn { padding: 5px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none;}
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
         .btn-download:hover { background: var(--accent); color: #121212; }
-        .btn-play { background: rgba(255, 209, 102, 0.1); color: #FFD166; flex: 1; }
-        .btn-play:hover { background: #FFD166; color: #121212; }
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
@@ -160,8 +159,6 @@ HTML_TEMPLATE = '''
         .file-msg { font-size: 13px; color: var(--text-sub); pointer-events: none; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 14px; }
-        .video-modal-content { max-width: 700px; text-align: center; }
-        .video-modal-content video { width: 100%; border-radius: 8px; max-height: 450px; background: #000; margin-bottom: 12px; }
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 16px; gap: 15px; }
         .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top: 4px solid var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -187,7 +184,6 @@ HTML_TEMPLATE = '''
                     <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์ทั่วไป</button>
                     <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
                     <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
-                    <button class="tab-btn" onclick="filterCategory('video', this)">🎬 วิดีโอ</button>
                 </div>
             </div>
             <div class="actions">
@@ -202,21 +198,16 @@ HTML_TEMPLATE = '''
                 <div class="card-icon">
                     {% if item.category == 'image' %}🖼️
                     {% elif item.category == 'zip' %}📦
-                    {% elif item.category == 'video' %}🎬
                     {% else %}📁{% endif %}
                 </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
                     {% if item.category == 'image' %}รูปภาพ
                     {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
-                    {% elif item.category == 'video' %}วิดีโอ
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
                 <div class="card-actions">
                     {% if item.file_url %}
-                        {% if item.category == 'video' %}
-                        <button type="button" class="card-btn btn-play" onclick="playVideo('{{ item.file_url }}', '{{ item.name }}')">เล่น</button>
-                        {% endif %}
                         <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
                     {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
@@ -243,7 +234,6 @@ HTML_TEMPLATE = '''
                         <option value="file">📁 ไฟล์ทั่วไป</option>
                         <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
                         <option value="image">🖼️ รูปภาพ</option>
-                        <option value="video">🎬 วิดีโอ</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -258,18 +248,6 @@ HTML_TEMPLATE = '''
                     <button type="submit" class="btn-primary">บันทึก</button>
                 </div>
             </form>
-        </div>
-    </div>
-
-    <div class="modal" id="videoModal">
-        <div class="modal-content video-modal-content">
-            <h3 id="videoModalTitle">🎬 เล่นวิดีโอ</h3>
-            <video id="videoPlayer" controls>
-                <source id="videoSource" src="" type="video/mp4">
-            </video>
-            <div class="modal-actions" style="justify-content: center;">
-                <button type="button" class="btn-secondary" onclick="closeVideoModal()">ปิดหน้าต่าง</button>
-            </div>
         </div>
     </div>
 
@@ -300,7 +278,6 @@ HTML_TEMPLATE = '''
                 fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
                 if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar')) categorySelect.value = 'zip';
                 else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/)) categorySelect.value = 'image';
-                else if (lowerName.match(/\.(mp4|mov|avi|mkv|webm)$/)) categorySelect.value = 'video';
                 if (!nameInput.value.trim()) nameInput.value = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
             }
         }
@@ -331,21 +308,6 @@ HTML_TEMPLATE = '''
 
         function openModal() { document.getElementById('addModal').classList.add('active'); }
         function closeModal() { document.getElementById('addModal').classList.remove('active'); }
-
-        function playVideo(videoUrl, videoName) {
-            const modal = document.getElementById('videoModal');
-            const player = document.getElementById('videoPlayer');
-            document.getElementById('videoModalTitle').innerText = `🎬 ${videoName}`;
-            document.getElementById('videoSource').src = videoUrl;
-            player.load();
-            modal.classList.add('active');
-            player.play().catch(e => console.log(e));
-        }
-        function closeVideoModal() {
-            const player = document.getElementById('videoPlayer');
-            player.pause();
-            document.getElementById('videoModal').classList.remove('active');
-        }
     </script>
 </body>
 </html>
@@ -376,8 +338,10 @@ def add_item():
     file_url = None
     if file and file.filename != '':
         try:
-            filename = file.filename
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            original_filename = file.filename
+            ext = os.path.splitext(original_filename)[1]
+            unique_filename = f"{uuid.uuid4().hex}{ext}"
+            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
             file.save(file_path)
             file_url = f"/{file_path}"
         except Exception as e:
