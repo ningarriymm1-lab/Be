@@ -11,7 +11,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 
 DB_NAME = 'storage.db'
 
-# กำหนดค่า Supabase โดยดึงจาก Environment Variables เป็นหลัก ป้องกันข้อผิดพลาดและซีเกรตหลุด
+# กำหนดค่า Supabase โดยดึงจาก Environment Variables เป็นหลัก
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
 SUPABASE_BUCKET = 'uploads' 
@@ -355,7 +355,6 @@ HTML_TEMPLATE = '''
                 const lowerName = fileName.toLowerCase();
                 fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
                 
-                // ตรวจสอบนามสกุลไฟล์ด้วย Regex ที่ปลอดภัยจาก Escape Warning
                 if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a') || lowerName.endsWith('.aac') || file.type.startsWith('audio/')) {
                     categorySelect.value = 'audio';
                 } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
@@ -431,7 +430,6 @@ def add_item():
             
             file_bytes = file.read()
             
-            # บังคับระบุ Content-Type ให้ถูกต้องตามประเภทไฟล์ ป้องกันเบราว์เซอร์เข้าใจผิดเป็นวิดีโอหน้าดำ
             content_type = file.content_type
             if ext.lower() == '.mp3':
                 content_type = 'audio/mpeg'
@@ -440,17 +438,20 @@ def add_item():
             elif ext.lower() == '.m4a':
                 content_type = 'audio/mp4'
 
-            # อัปโหลดไฟล์ขึ้น Supabase Storage (Bucket: uploads)
+            # อัปโหลดไฟล์ขึ้น Supabase Storage
             supabase.storage.from_(SUPABASE_BUCKET).upload(
                 path=unique_filename,
                 file=file_bytes,
                 file_options={"content-type": content_type}
             )
             
-            # ดึง Public URL ป้องกัน 404 โดยตรวจสอบรูปแบบ URL จาก Supabase
+            # ปรับปรุงการดึง Public URL ให้รองรับทุกเวอร์ชันของไลบรารี Supabase Python
             public_url_res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
+            
             if isinstance(public_url_res, dict):
                 file_url = public_url_res.get('publicUrl') or public_url_res.get('data', {}).get('publicUrl')
+            elif hasattr(public_url_res, 'public_url'):
+                file_url = public_url_res.public_url
             else:
                 file_url = str(public_url_res)
                 
@@ -476,7 +477,7 @@ def delete_item(item_id):
     if row and row[0]:
         try:
             file_url = row[0]
-            filename = file_url.split('/')[-1].split('?')[0] # ตัด Query string ออก ป้องกันพาร์ทผิดพลาด
+            filename = file_url.split('/')[-1].split('?')[0]
             supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
         except Exception as e:
             print(f"Supabase file delete error: {e}")
