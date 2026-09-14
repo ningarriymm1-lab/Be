@@ -4,14 +4,19 @@ import os
 import base64
 import requests
 import uuid
+from supabase import create_client, Client
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดสูงสุด 500MB
 
 DB_NAME = 'storage.db'
-UPLOAD_FOLDER = 'static/uploads'
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# กำหนดค่า Supabase ของคุณ
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3MjQzOSwiZXhwIjoyMTA0OTQ4NDM5fQ.B_Lxtwy6qmUYqkDmRYZY4SNEASLhxD0D3US0KZtbrSk')
+SUPABASE_BUCKET = 'uploads' 
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
@@ -28,7 +33,6 @@ def download_db_from_github():
                 file_bytes = base64.b64decode(file_data['content'])
                 with open(DB_NAME, 'wb') as f:
                     f.write(file_bytes)
-                print("ดาวน์โหลดฐานข้อมูลจาก GitHub สำเร็จ")
     except Exception as e:
         print(f"ไม่สามารถดาวน์โหลด DB ได้: {e}")
 
@@ -153,6 +157,9 @@ HTML_TEMPLATE = '''
         .card-icon { font-size: 28px; margin-bottom: 6px; height: 40px; display: flex; align-items: center; justify-content: center; }
         .card-title { font-size: 13px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 10px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
+        
+        audio { width: 100%; height: 32px; margin-bottom: 8px; border-radius: 6px; }
+
         .card-actions { display: flex; gap: 4px; width: 100%; margin-top: auto; }
         .card-btn { padding: 5px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
@@ -175,7 +182,6 @@ HTML_TEMPLATE = '''
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; }
         
-        /* หน้าต่างแสดงสถานะความคืบหน้าอัปโหลดแบบเรียลไทม์ */
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
@@ -184,11 +190,11 @@ HTML_TEMPLATE = '''
 <body>
 
     <div id="loadingOverlay">
-        <div style="font-weight: 600;" id="uploadStatusText">กำลังอัปโหลดไฟล์... 0%</div>
+        <div style="font-weight: 600;" id="uploadStatusText">กำลังอัปโหลดไฟล์ไป Supabase... 0%</div>
         <div class="progress-container">
             <div class="progress-bar" id="progressBar"></div>
         </div>
-        <div style="font-size: 12px; color: var(--text-sub);">กำลังส่งข้อมูลด้วยความเร็วสูงสุด...</div>
+        <div style="font-size: 12px; color: var(--text-sub);">กำลังบันทึกข้อมูลและสำรองระบบ...</div>
     </div>
 
     <div class="container">
@@ -202,6 +208,7 @@ HTML_TEMPLATE = '''
                 <div class="tabs">
                     <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
                     <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์ทั่วไป</button>
+                    <button class="tab-btn" onclick="filterCategory('audio', this)">🎵 เสียง (MP3)</button>
                     <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
                     <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
                 </div>
@@ -217,18 +224,29 @@ HTML_TEMPLATE = '''
             <div class="card item-card" data-category="{{ item.category }}" data-name="{{ item.name | lower }}">
                 <div class="card-icon">
                     {% if item.category == 'image' %}🖼️
+                    {% elif item.category == 'audio' %}🎵
                     {% elif item.category == 'zip' %}📦
                     {% else %}📁{% endif %}
                 </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
                     {% if item.category == 'image' %}รูปภาพ
+                    {% elif item.category == 'audio' %}เสียง (MP3)
                     {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
+
+                {% if item.category == 'audio' and item.file_url %}
+                <audio controls preload="none">
+                    <source src="{{ item.file_url }}" type="audio/mpeg">
+                    <source src="{{ item.file_url }}" type="audio/mp3">
+                    เบราว์เซอร์ของคุณไม่รองรับการเล่นเสียง
+                </audio>
+                {% endif %}
+
                 <div class="card-actions">
                     {% if item.file_url %}
-                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
+                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>ดาวน์โหลด</a>
                     {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
@@ -252,6 +270,7 @@ HTML_TEMPLATE = '''
                     <label>หมวดหมู่</label>
                     <select name="category" id="itemCategory" class="form-control">
                         <option value="file">📁 ไฟล์ทั่วไป</option>
+                        <option value="audio">🎵 ไฟล์เสียง (.mp3, .wav, .m4a)</option>
                         <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
                         <option value="image">🖼️ รูปภาพ</option>
                     </select>
@@ -274,7 +293,6 @@ HTML_TEMPLATE = '''
     <script>
         let currentCategory = 'all';
 
-        // ระบบอัปโหลดผ่าน AJAX พร้อมแสดงแถบเปอร์เซ็นต์ความเร็วแบบเรียลไทม์
         function uploadFileWithProgress(event) {
             event.preventDefault();
             const form = document.getElementById('uploadForm');
@@ -332,11 +350,22 @@ HTML_TEMPLATE = '''
             const nameInput = document.getElementById('itemName');
             const categorySelect = document.getElementById('itemCategory');
             if (input.files && input.files.length > 0) {
-                const fileName = input.files[0].name;
+                const file = input.files[0];
+                const fileName = file.name;
                 const lowerName = fileName.toLowerCase();
                 fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
-                if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar')) categorySelect.value = 'zip';
-                else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/)) categorySelect.value = 'image';
+                
+                // ตรวจสอบนามสกุลไฟล์เพื่อเลือกหมวดหมู่ให้ถูกต้อง ไม่ให้สับสนแปลงไปเป็นวิดีโอหน้าดำ
+                if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a') || lowerName.endsWith('.aac') || file.type.startsWith('audio/')) {
+                    categorySelect.value = 'audio';
+                } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
+                    categorySelect.value = 'zip';
+                } else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
+                    categorySelect.value = 'image';
+                } else {
+                    categorySelect.value = 'file';
+                }
+
                 if (!nameInput.value.trim()) nameInput.value = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
             }
         }
@@ -399,19 +428,34 @@ def add_item():
             original_filename = file.filename
             ext = os.path.splitext(original_filename)[1]
             unique_filename = f"{uuid.uuid4().hex}{ext}"
-            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
             
-            # ใช้ Buffer ขนาดใหญ่ (10MB) ในการบันทึกไฟล์ลงดิสก์เพื่อให้ความเร็วสูงสุด
-            with open(file_path, 'wb') as f:
-                while True:
-                    chunk = file.stream.read(10 * 1024 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    
-            file_url = f"/{file_path}"
+            file_bytes = file.read()
+            
+            # บังคับระบุ Content-Type ให้ถูกต้องตามประเภทไฟล์ ป้องกันเบราว์เซอร์เข้าใจผิดเป็นวิดีโอหน้าดำ
+            content_type = file.content_type
+            if ext.lower() == '.mp3':
+                content_type = 'audio/mpeg'
+            elif ext.lower() == '.wav':
+                content_type = 'audio/wav'
+            elif ext.lower() == '.m4a':
+                content_type = 'audio/mp4'
+
+            # อัปโหลดไฟล์ขึ้น Supabase Storage (Bucket: uploads)
+            supabase.storage.from_(SUPABASE_BUCKET).upload(
+                path=unique_filename,
+                file=file_bytes,
+                file_options={"content-type": content_type}
+            )
+            
+            # ดึง Public URL ป้องกัน 404 โดยตรวจสอบรูปแบบ URL จาก Supabase
+            public_url_res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
+            if isinstance(public_url_res, dict):
+                file_url = public_url_res.get('publicUrl') or public_url_res.get('data', {}).get('publicUrl')
+            else:
+                file_url = str(public_url_res)
+                
         except Exception as e:
-            print(f"Local save error: {e}")
+            print(f"Supabase upload error: {e}")
 
     if name:
         conn = sqlite3.connect(DB_NAME)
@@ -431,11 +475,11 @@ def delete_item(item_id):
     row = cursor.fetchone()
     if row and row[0]:
         try:
-            file_path = row[0].lstrip('/')
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            file_url = row[0]
+            filename = file_url.split('/')[-1].split('?')[0] # ตัด Query string ออก ป้องกันพาร์ทผิดพลาด
+            supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
         except Exception as e:
-            print(f"File delete error: {e}")
+            print(f"Supabase file delete error: {e}")
             
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
