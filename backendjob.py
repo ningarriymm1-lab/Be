@@ -13,12 +13,9 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 DB_NAME = 'storage.db'
 
 # --- เก็บไฟล์บน Supabase Storage (คลาวด์ถาวร) แทนการเซฟลงดิสก์ของเซิร์ฟเวอร์ ---
-# เหตุผล: ดิสก์ของเซิร์ฟเวอร์ (เช่น Railway/Render) เป็นพื้นที่ชั่วคราว (ephemeral)
-# ทุกครั้งที่ redeploy/restart ไฟล์ที่เซฟไว้ในดิสก์จะหายหมด มีแค่ storage.db
-# ที่รอดเพราะถูก backup ไป GitHub เท่านั้น การย้ายไฟล์ไป Supabase Storage
-# (อยู่นอกคอนเทนเนอร์) ทำให้ทั้งไฟล์และข้อมูลอยู่ถาวรไม่หายอีกต่อไป
 SUPABASE_URL = 'https://pcuxecmczaptvtfnemwk.supabase.co'
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4'
+SUPABASE_BUCKET = 'uploads'
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -282,7 +279,6 @@ HTML_TEMPLATE = '''
     <script>
         let currentCategory = 'all';
 
-        // ระบบอัปโหลดผ่าน AJAX พร้อมแสดงแถบเปอร์เซ็นต์ความเร็วแบบเรียลไทม์
         function uploadFileWithProgress(event) {
             event.preventDefault();
             const form = document.getElementById('uploadForm');
@@ -398,8 +394,7 @@ def index():
 @app.route('/download/<int:item_id>')
 def download_file(item_id):
     """
-    พร็อกซีดาวน์โหลดไฟล์ผ่านเซิร์ฟเวอร์ของเราเอง แทนที่จะลิงก์ตรงไป Supabase
-    (attribute "download" ใช้ไม่ได้ข้ามโดเมน ไฟล์จะเปิดในแท็บใหม่แทนที่จะดาวน์โหลดจริง)
+    พร็อกซีดาวน์โหลดไฟล์แบบ Stream ผ่านเซิร์ฟเวอร์ รองรับไฟล์ขนาดใหญ่โดยไม่กิน RAM และโหลดติดปกติ
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -415,20 +410,33 @@ def download_file(item_id):
     safe_name = item_name if item_name.lower().endswith(ext.lower()) else f"{item_name}{ext}"
 
     try:
-        upstream = requests.get(file_url, timeout=60)
+        upstream = requests.get(file_url, stream=True, timeout=60)
         upstream.raise_for_status()
     except Exception as e:
         return f"ไม่สามารถดาวน์โหลดไฟล์จากที่เก็บข้อมูลได้: {e}", 502
 
     content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
+    file_size = upstream.headers.get('Content-Length')
     quoted_name = quote(safe_name)
 
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{quoted_name}\"; filename*=UTF-8''{quoted_name}"
+    }
+    if file_size:
+        headers["Content-Length"] = file_size
+
+    def generate():
+        try:
+            for chunk in upstream.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
     return Response(
-        upstream.content,
+        generate(),
         mimetype=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{quoted_name}\"; filename*=UTF-8''{quoted_name}"
-        }
+        headers=headers
     )
 
 @app.route('/add', methods=['POST'])
@@ -445,10 +453,8 @@ def add_item():
             unique_filename = f"{uuid.uuid4().hex}{ext}"
 
             file_bytes = file.read()
-
             content_type = file.content_type or 'application/octet-stream'
 
-            # อัปโหลดไฟล์ขึ้น Supabase Storage (พื้นที่คลาวด์ถาวร) แทนการเขียนลงดิสก์
             supabase.storage.from_(SUPABASE_BUCKET).upload(
                 path=unique_filename,
                 file=file_bytes,
