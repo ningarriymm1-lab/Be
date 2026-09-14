@@ -17,9 +17,8 @@ DB_NAME = 'storage.db'
 # ทุกครั้งที่ redeploy/restart ไฟล์ที่เซฟไว้ในดิสก์จะหายหมด มีแค่ storage.db
 # ที่รอดเพราะถูก backup ไป GitHub เท่านั้น การย้ายไฟล์ไป Supabase Storage
 # (อยู่นอกคอนเทนเนอร์) ทำให้ทั้งไฟล์และข้อมูลอยู่ถาวรไม่หายอีกต่อไป
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzg1NDksImV4cCI6MjEwNDk1NDU0OX0.PRb5MCjAtRmpEhYMG0E1ZKruaTCikf0vyWUgSPWIet8').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4')
-SUPABASE_BUCKET = 'uploads'
+SUPABASE_URL = 'https://pcuxecmczaptvtfnemwk.supabase.co'
+SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4'
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
