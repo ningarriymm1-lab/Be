@@ -6,7 +6,7 @@ import requests
 import uuid
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB ป้องกันเซิร์ฟเวอร์ล่ม
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB
 
 DB_NAME = 'storage.db'
 UPLOAD_FOLDER = 'static/uploads'
@@ -131,7 +131,6 @@ HTML_TEMPLATE = '''
         }
         .btn-primary:hover { background-color: var(--accent-hover); }
 
-        /* ปรับโครงสร้าง Grid ให้แสดงผลขนาดเท่ากันเป๊ะในมือถือและจอคอม */
         .grid-container {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -148,8 +147,7 @@ HTML_TEMPLATE = '''
             background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
             padding: 10px; position: relative; transition: transform 0.2s, border-color 0.2s;
             display: flex; flex-direction: column; align-items: center; text-align: center;
-            height: 100%; /* บังคับให้การ์ดสูงเต็มช่องแบบสม่ำเสมอ */
-            overflow: hidden;
+            height: 100%; overflow: hidden;
         }
         .card:hover { transform: translateY(-3px); border-color: var(--accent); }
         .card-icon { font-size: 28px; margin-bottom: 6px; height: 40px; display: flex; align-items: center; justify-content: center; }
@@ -162,6 +160,7 @@ HTML_TEMPLATE = '''
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
+        
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
         .modal.active { display: flex; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border); padding: 20px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -175,16 +174,21 @@ HTML_TEMPLATE = '''
         .file-msg { font-size: 12px; color: var(--text-sub); pointer-events: none; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; }
-        #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 12px; }
-        .spinner { width: 36px; height: 36px; border: 4px solid var(--border); border-top: 4px solid var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* หน้าต่างแสดงสถานะความคืบหน้าอัปโหลดแบบเรียลไทม์ */
+        #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
+        .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
+        .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
     </style>
 </head>
 <body>
 
     <div id="loadingOverlay">
-        <div class="spinner"></div>
-        <div>กำลังบันทึกข้อมูล กรุณารอสักครู่...</div>
+        <div style="font-weight: 600;" id="uploadStatusText">กำลังอัปโหลดไฟล์... 0%</div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-sub);">กำลังส่งข้อมูลด้วยความเร็วสูงสุด...</div>
     </div>
 
     <div class="container">
@@ -239,7 +243,7 @@ HTML_TEMPLATE = '''
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
-            <form action="{{ url_for('add_item') }}" method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
+            <form id="uploadForm" onsubmit="uploadFileWithProgress(event)">
                 <div class="form-group">
                     <label>ชื่อที่แสดง</label>
                     <input type="text" name="name" id="itemName" class="form-control" required placeholder="ชื่อไฟล์...">
@@ -269,7 +273,46 @@ HTML_TEMPLATE = '''
 
     <script>
         let currentCategory = 'all';
-        function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
+
+        // ระบบอัปโหลดผ่าน AJAX พร้อมแสดงแถบเปอร์เซ็นต์ความเร็วแบบเรียลไทม์
+        function uploadFileWithProgress(event) {
+            event.preventDefault();
+            const form = document.getElementById('uploadForm');
+            const formData = new FormData(form);
+            const overlay = document.getElementById('loadingOverlay');
+            const progressBar = document.getElementById('progressBar');
+            const statusText = document.getElementById('uploadStatusText');
+
+            overlay.style.display = 'flex';
+            progressBar.style.width = '0%';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', "{{ url_for('add_item') }}", true);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentComplete + '%';
+                    statusText.innerText = `กำลังอัปโหลดไฟล์... ${percentComplete}%`;
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    window.location.reload();
+                } else {
+                    alert('เกิดข้อผิดพลาดในการอัปโหลด กรุณาลองใหม่อีกครั้ง');
+                    overlay.style.display = 'none';
+                }
+            };
+
+            xhr.onerror = function() {
+                alert('การเชื่อมต่อขัดข้อง');
+                overlay.style.display = 'none';
+            };
+
+            xhr.send(formData);
+        }
         
         const titleInput = document.getElementById('systemTitleInput');
         let timeout = null;
@@ -357,7 +400,15 @@ def add_item():
             ext = os.path.splitext(original_filename)[1]
             unique_filename = f"{uuid.uuid4().hex}{ext}"
             file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-            file.save(file_path)
+            
+            # ใช้ Buffer ขนาดใหญ่ (10MB) ในการบันทึกไฟล์ลงดิสก์เพื่อให้ความเร็วสูงสุด
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = file.stream.read(10 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    
             file_url = f"/{file_path}"
         except Exception as e:
             print(f"Local save error: {e}")
@@ -370,7 +421,7 @@ def add_item():
         conn.close()
         upload_db_to_github()
 
-    return redirect(url_for('index'))
+    return jsonify({'status': 'success'})
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
