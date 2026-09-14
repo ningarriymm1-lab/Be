@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify, Response
 import sqlite3
 import os
 import base64
@@ -96,18 +96,26 @@ HTML_TEMPLATE = '''
             --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
             --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
             --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
-            --success: #81C995;
+            --success: #81C995; --download-code: #FFD54F;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 15px; }
         .container { max-width: 1000px; margin: 0 auto; }
-        header { margin-bottom: 15px; }
+        header { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
         h1 { font-size: 24px; font-weight: 700; color: #FFFFFF; margin-bottom: 5px; }
         .editable-title {
             background: transparent; border: 1px dashed transparent; color: var(--text-sub);
             font-size: 14px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s;
         }
         .editable-title:hover, .editable-title:focus { background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none; }
+        
+        .btn-download-code {
+            background-color: var(--download-code); color: #121212; border: none; padding: 8px 12px;
+            border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none;
+            font-size: 12px; transition: opacity 0.2s;
+        }
+        .btn-download-code:hover { opacity: 0.9; }
+
         .toolbar {
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
             gap: 10px; margin-bottom: 15px; background-color: var(--bg-card); padding: 10px 14px;
@@ -190,7 +198,6 @@ HTML_TEMPLATE = '''
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
 
-        /* Viewer Modal สำหรับกดใช้งาน */
         #viewerModal .modal-content { max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; }
         .viewer-body { flex: 1; overflow-y: auto; text-align: center; margin: 10px 0; }
         .viewer-body img, .viewer-body video { max-width: 100%; max-height: 50vh; border-radius: 8px; object-fit: contain; }
@@ -210,8 +217,11 @@ HTML_TEMPLATE = '''
 
     <div class="container">
         <header>
-            <h1>ระบบเก็บข้อมูล</h1>
-            <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
+            <div>
+                <h1>ระบบเก็บข้อมูล</h1>
+                <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
+            </div>
+            <a href="{{ url_for('download_source_code') }}" class="btn-download-code">💾 โหลดไฟล์ Python (app.py)</a>
         </header>
 
         <div class="toolbar">
@@ -277,7 +287,6 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Modal เพิ่มข้อมูล -->
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
@@ -310,13 +319,10 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Modal กดใช้งาน (View / Preview) -->
     <div class="modal" id="viewerModal">
         <div class="modal-content">
             <h3 id="viewerTitle">ใช้งานไฟล์</h3>
-            <div class="viewer-body" id="viewerBody">
-                <!-- เนื้อหาจะถูกแทรกด้วย JavaScript -->
-            </div>
+            <div class="viewer-body" id="viewerBody"></div>
             <div class="modal-actions">
                 <a id="viewerDownloadBtn" href="#" class="btn-primary" target="_blank" download style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
                 <button type="button" class="btn-secondary" onclick="closeViewerModal()">ปิด</button>
@@ -487,6 +493,16 @@ def index():
     items = [{'id': r[0], 'name': r[1], 'category': r[2], 'file_url': r[3]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
+
+@app.route('/download_code')
+def download_source_code():
+    # สร้างเส้นทางดาวน์โหลดไฟล์โค้ดตัวมันเอง (app.py) ลงเครื่อง
+    script_path = __file__
+    return Response(
+        open(script_path, 'rb').read(),
+        mimetype="text/plain",
+        headers={"Content-disposition": "attachment; filename=app.py"}
+    )
 
 @app.route('/add', methods=['POST'])
 def add_item():
