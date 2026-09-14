@@ -9,11 +9,13 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 DB_NAME = 'storage.db'
 
+# กำหนดค่า GitHub API สำหรับเก็บไฟล์และฐานข้อมูล
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 
 def download_db_from_github():
+    """ พยายามดาวน์โหลดฐานข้อมูลล่าสุดจาก GitHub มาไว้ที่เซิร์ฟเวอร์ """
     try:
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -24,15 +26,19 @@ def download_db_from_github():
                 file_bytes = base64.b64decode(file_data['content'])
                 with open(DB_NAME, 'wb') as f:
                     f.write(file_bytes)
+                print("ดาวน์โหลดฐานข้อมูลจาก GitHub สำเร็จ")
     except Exception as e:
-        print(f"DB Download Error: {e}")
+        print(f"ไม่สามารถดาวน์โหลด DB ได้ (ใช้ไฟล์ท้องถิ่นแทน): {e}")
 
 def upload_db_to_github():
+    """ บันทึกและอัปโหลดฐานข้อมูลล่าสุดขึ้น GitHub ทันที เพื่อป้องกันข้อมูลหาย """
     try:
         if not os.path.exists(DB_NAME):
             return
+        
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+        
         res = requests.get(api_url, headers=headers)
         sha = res.json().get('sha') if res.status_code == 200 else None
         
@@ -47,21 +53,27 @@ def upload_db_to_github():
         }
         if sha:
             payload["sha"] = sha
-        requests.put(api_url, headers=headers, json=payload)
+            
+        put_res = requests.put(api_url, headers=headers, json=payload)
+        if put_res.status_code in [200, 201]:
+            print("สำรองข้อมูลฐานข้อมูลขึ้น GitHub สำเร็จ!")
+        else:
+            print(f"สำรองฐานข้อมูลไม่สำเร็จ: {put_res.text}")
     except Exception as e:
-        print(f"DB Upload Error: {e}")
+        print(f"เกิดข้อผิดพลาดในการอัปโหลด DB: {e}")
 
 def init_db():
     download_db_from_github()
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            filename TEXT,
-            url TEXT
+            filename TEXT
         )
     ''')
     
@@ -69,9 +81,7 @@ def init_db():
     columns = [column[1] for column in cursor.fetchall()]
     if 'filename' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN filename TEXT")
-    if 'url' not in columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN url TEXT")
-        
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -79,6 +89,7 @@ def init_db():
         )
     ''')
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน')")
+    
     conn.commit()
     conn.close()
     upload_db_to_github()
@@ -93,15 +104,23 @@ HTML_TEMPLATE = '''
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
-            --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
-            --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
+            --bg-main: #121212;
+            --bg-card: #1E1F22;
+            --bg-card-hover: #2B2D31;
+            --text-main: #E3E3E3;
+            --text-sub: #9E9E9E;
+            --accent: #A4C8F0;
+            --accent-hover: #8AB8EC;
+            --border: #2D2F31;
+            --danger: #F28B82;
         }
+
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
         header { margin-bottom: 20px; }
         h1 { font-size: 28px; font-weight: 700; color: #FFFFFF; margin-bottom: 5px; }
+        
         .editable-title {
             background: transparent; border: 1px dashed transparent; color: var(--text-sub);
             font-size: 15px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s;
@@ -109,6 +128,7 @@ HTML_TEMPLATE = '''
         .editable-title:hover, .editable-title:focus {
             background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none;
         }
+
         .toolbar {
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
             gap: 12px; margin-bottom: 20px; background-color: var(--bg-card); padding: 12px 16px;
@@ -122,21 +142,37 @@ HTML_TEMPLATE = '''
         }
         .tab-btn:hover { color: var(--text-main); background: var(--bg-card-hover); }
         .tab-btn.active { background-color: var(--accent); color: #121212; font-weight: 600; }
+
         .actions { display: flex; gap: 10px; align-items: center; width: 100%; justify-content: space-between; }
-        @media (min-width: 600px) { .actions { width: auto; } }
+        @media (min-width: 600px) {
+            .actions { width: auto; }
+        }
         .search-box {
             background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main);
             padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; flex: 1; max-width: 200px;
         }
         .search-box:focus { border-color: var(--accent); }
+
         .btn-primary {
             background-color: var(--accent); color: #121212; border: none; padding: 9px 16px;
             border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none;
             transition: transform 0.1s, background-color 0.2s; white-space: nowrap; font-size: 14px;
         }
         .btn-primary:hover { background-color: var(--accent-hover); }
-        .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        @media (min-width: 640px) { .grid-container { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; } }
+        .btn-primary:active { transform: scale(0.97); }
+
+        .grid-container { 
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr); 
+            gap: 12px; 
+        }
+        @media (min-width: 640px) {
+            .grid-container { 
+                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
+                gap: 20px; 
+            }
+        }
+
         .card {
             background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
             padding: 12px; position: relative; transition: transform 0.2s, border-color 0.2s;
@@ -146,30 +182,54 @@ HTML_TEMPLATE = '''
         .card-icon { font-size: 32px; margin-bottom: 8px; height: 50px; display: flex; align-items: center; justify-content: center; }
         .card-title { font-size: 14px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 11px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 10px; }
+        
         .card-actions { display: flex; gap: 6px; width: 100%; margin-top: auto; }
         .card-btn { padding: 5px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none;}
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
         .btn-download:hover { background: var(--accent); color: #121212; }
+        .btn-play { background: rgba(255, 209, 102, 0.1); color: #FFD166; flex: 1; }
+        .btn-play:hover { background: #FFD166; color: #121212; }
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
+
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
+
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
         .modal.active { display: flex; }
-        .modal-content { background: var(--bg-card); border: 1px solid var(--border); padding: 24px; border-radius: 16px; width: 100%; max-width: 440px; }
-        .modal-content h3 { margin-bottom: 16px; color: #fff; font-size: 18px; font-weight: 600; }
+        .modal-content { background: var(--bg-card); border: 1px solid var(--border); padding: 24px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .modal-content h3 { margin-bottom: 16px; color: #fff; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 6px; font-weight: 500; }
-        .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; }
+        .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
         .form-control:focus { border-color: var(--accent); }
+
+        .file-drop-area {
+            border: 2px dashed var(--border); border-radius: 10px; padding: 18px; text-align: center;
+            background: var(--bg-main); cursor: pointer; transition: all 0.2s ease; position: relative;
+        }
+        .file-drop-area:hover { border-color: var(--accent); background: rgba(164, 200, 240, 0.03); }
+        .file-drop-area input[type="file"] {
+            position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+        }
+        .file-msg { font-size: 13px; color: var(--text-sub); pointer-events: none; }
+        .file-msg span { color: var(--accent); font-weight: 500; }
+
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; transition: background 0.2s; font-size: 14px; }
+        .btn-secondary:hover { background: var(--bg-card-hover); }
+        
+        /* Video Player Modal Styling */
+        .video-modal-content { max-width: 700px; text-align: center; }
+        .video-modal-content video { width: 100%; border-radius: 8px; max-height: 450px; background: #000; margin-bottom: 12px; }
     </style>
 </head>
 <body>
+
     <div class="container">
         <header>
             <h1>ระบบเก็บข้อมูล</h1>
-            <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบ...">
+            <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
         </header>
 
         <div class="toolbar">
@@ -177,14 +237,18 @@ HTML_TEMPLATE = '''
                 <div class="tabs">
                     <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
                     <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์ทั่วไป</button>
-                    <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป</button>
+                    <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
                     <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
-                    <button class="tab-btn" onclick="filterCategory('video', this)">🎬 วิดีโอ/ลิงก์</button>
+                    <button class="tab-btn" onclick="filterCategory('video', this)">🎬 วิดีโอ</button>
+                    <button class="tab-btn" onclick="filterCategory('drive', this)">💽 ไดรฟ์</button>
                 </div>
             </div>
             <div class="actions">
                 <input type="text" id="searchInput" class="search-box" placeholder="ค้นหาข้อมูล..." oninput="handleSearch()">
-                <button class="btn-primary" onclick="openModal()">➕ เพิ่มข้อมูล</button>
+                <button class="btn-primary" onclick="openModal()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    เพิ่มข้อมูล
+                </button>
             </div>
         </div>
 
@@ -195,20 +259,23 @@ HTML_TEMPLATE = '''
                     {% if item.category == 'image' %}🖼️
                     {% elif item.category == 'zip' %}📦
                     {% elif item.category == 'video' %}🎬
+                    {% elif item.category == 'drive' %}💽
                     {% else %}📁{% endif %}
                 </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
                     {% if item.category == 'image' %}รูปภาพ
                     {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
-                    {% elif item.category == 'video' %}วิดีโอ/ลิงก์
+                    {% elif item.category == 'video' %}วิดีโอ
+                    {% elif item.category == 'drive' %}ไดรฟ์
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
                 <div class="card-actions">
                     {% if item.filename %}
-                    <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
-                    {% elif item.url %}
-                    <a href="{{ item.url }}" class="card-btn btn-download" target="_blank">เปิดดู</a>
+                        {% if item.category == 'video' %}
+                        <button type="button" class="card-btn btn-play" onclick="playVideo('{{ url_for('download_file', filename=item.filename) }}', '{{ item.name }}')">เล่น</button>
+                        {% endif %}
+                        <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
                     {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
@@ -216,93 +283,177 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
             {% endfor %}
-            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูลที่คุณค้นหา</div>
+            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูลในเงื่อนไขที่คุณค้นหา</div>
         </div>
     </div>
 
     <div class="modal" id="addModal">
         <div class="modal-content">
-            <h3>📦 เพิ่มไฟล์หรือวิดีโอ</h3>
+            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์จากมือถือ</h3>
             <form action="{{ url_for('add_item') }}" method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label>ชื่อที่แสดง</label>
-                    <input type="text" name="name" class="form-control" required placeholder="ชื่อหัวข้อ">
+                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="เช่น โฟลเดอร์งาน หรือ ไฟล์ซิปรวม">
                 </div>
                 <div class="form-group">
                     <label>หมวดหมู่</label>
-                    <select name="category" id="categorySelect" class="form-control" onchange="toggleInputType()">
+                    <select name="category" id="itemCategory" class="form-control">
                         <option value="file">📁 ไฟล์ทั่วไป</option>
-                        <option value="zip">📦 ไฟล์ซิป (.zip)</option>
+                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
                         <option value="image">🖼️ รูปภาพ</option>
-                        <option value="video">🎬 วิดีโอ (ใส่ลิงก์สตรีม/Google Drive)</option>
+                        <option value="video">🎬 วิดีโอ (.mp4, .mov, .avi, .mkv)</option>
+                        <option value="drive">💽 ไดรฟ์ / ลิงก์</option>
                     </select>
                 </div>
-                <div class="form-group" id="fileFieldGroup">
-                    <label>เลือกไฟล์จากเครื่อง</label>
-                    <input type="file" name="file" class="form-control" accept="*/*">
+                <div class="form-group">
+                    <label>เลือกไฟล์จากเครื่องมือถือ (รองรับทุกไฟล์)</label>
+                    <div class="file-drop-area" id="dropArea">
+                        <input type="file" name="file" id="fileInput" accept="*/*" required onchange="handleFileSelect(this)">
+                        <div class="file-msg" id="fileMsg">
+                            📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group" id="urlFieldGroup" style="display: none;">
-                    <label>วางลิงก์วิดีโอ (เช่น Google Drive / YouTube)</label>
-                    <input type="url" name="url" class="form-control" placeholder="https://...">
-                </div>
+
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
-                    <button type="submit" class="btn-primary">บันทึก</button>
+                    <button type="submit" class="btn-primary">อัปโหลด</button>
                 </div>
             </form>
         </div>
     </div>
 
+    <div class="modal" id="videoModal">
+        <div class="modal-content video-modal-content">
+            <h3 id="videoModalTitle">🎬 เล่นวิดีโอ</h3>
+            <video id="videoPlayer" controls>
+                <source id="videoSource" src="" type="video/mp4">
+                เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอ
+            </video>
+            <div class="modal-actions" style="justify-content: center;">
+                <button type="button" class="btn-secondary" onclick="closeVideoModal()">ปิดหน้าต่าง</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentCategory = 'all';
-        function toggleInputType() {
-            const cat = document.getElementById('categorySelect').value;
-            const fileGroup = document.getElementById('fileFieldGroup');
-            const urlGroup = document.getElementById('urlFieldGroup');
-            if (cat === 'video') {
-                fileGroup.style.display = 'none';
-                urlGroup.style.display = 'block';
+
+        const titleInput = document.getElementById('systemTitleInput');
+        let timeout = null;
+        titleInput.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                fetch('/update_title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: titleInput.value })
+                });
+            }, 500);
+        });
+
+        function handleFileSelect(input) {
+            const fileMsg = document.getElementById('fileMsg');
+            const nameInput = document.getElementById('itemName');
+            const categorySelect = document.getElementById('itemCategory');
+            
+            if (input.files && input.files.length > 0) {
+                const fileName = input.files[0].name;
+                const lowerName = fileName.toLowerCase();
+                fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
+                
+                if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z') || lowerName.endsWith('.tar')) {
+                    categorySelect.value = 'zip';
+                } else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.gif') || lowerName.endsWith('.webp')) {
+                    categorySelect.value = 'image';
+                } else if (lowerName.endsWith('.mp4') || lowerName.endsWith('.mov') || lowerName.endsWith('.avi') || lowerName.endsWith('.mkv') || lowerName.endsWith('.webm')) {
+                    categorySelect.value = 'video';
+                }
+
+                if (!nameInput.value.trim()) {
+                    const cleanName = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+                    nameInput.value = cleanName;
+                }
             } else {
-                fileGroup.style.display = 'block';
-                urlGroup.style.display = 'none';
+                fileMsg.innerHTML = `📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป`;
             }
         }
-        function filterCategory(category, btn) {
+
+        function filterCategory(category, btnElement) {
             currentCategory = category;
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            btnElement.classList.add('active');
             handleSearch();
         }
+
         function handleSearch() {
             const query = document.getElementById('searchInput').value.toLowerCase();
-            let count = 0;
-            document.querySelectorAll('.item-card').forEach(card => {
-                const matchCat = currentCategory === 'all' || card.dataset.category === currentCategory;
-                const matchName = card.dataset.name.includes(query);
-                if (matchCat && matchName) { card.style.display = 'flex'; count++; }
-                else { card.style.display = 'none'; }
+            const cards = document.querySelectorAll('.item-card');
+            let visibleCount = 0;
+
+            cards.forEach(card => {
+                const cat = card.getAttribute('data-category');
+                const name = card.getAttribute('data-name');
+                const matchCategory = currentCategory === 'all' || cat === currentCategory;
+                const matchQuery = name.includes(query);
+
+                if (matchCategory && matchQuery) {
+                    card.style.display = 'flex';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
             });
-            document.getElementById('emptyState').style.display = count === 0 ? 'block' : 'none';
+
+            document.getElementById('emptyState').style.display = visibleCount === 0 ? 'block' : 'none';
         }
+
         function openModal() { document.getElementById('addModal').classList.add('active'); }
-        function closeModal() { document.getElementById('addModal').classList.remove('active'); }
+        function closeModal() { 
+            document.getElementById('addModal').classList.remove('active');
+            document.getElementById('fileMsg').innerHTML = `📱 แตะที่นี่เพื่อเลือกไฟล์หรือโฟลเดอร์ซิป`;
+        }
+
+        function playVideo(videoUrl, videoName) {
+            const modal = document.getElementById('videoModal');
+            const player = document.getElementById('videoPlayer');
+            const source = document.getElementById('videoSource');
+            const title = document.getElementById('videoModalTitle');
+
+            title.innerText = `🎬 ${videoName}`;
+            source.src = videoUrl;
+            player.load();
+            modal.classList.add('active');
+            player.play().catch(e => console.log("Autoplay blocked:", e));
+        }
+
+        function closeVideoModal() {
+            const modal = document.getElementById('videoModal');
+            const player = document.getElementById('videoPlayer');
+            player.pause();
+            player.currentTime = 0;
+            modal.classList.remove('active');
+        }
     </script>
 </body>
 </html>
 '''
 
+# เรียกใช้งานฟังก์ชันตั้งค่าฐานข้อมูลตอนเริ่มต้น
 init_db()
 
 @app.route('/')
 def index():
     download_db_from_github()
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
     row = cursor.fetchone()
     system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
-    cursor.execute("SELECT id, name, category, filename, url FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3], 'url': r[4]} for r in cursor.fetchall()]
+    
+    cursor.execute("SELECT id, name, category, filename FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'filename': r[3]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
@@ -310,18 +461,29 @@ def index():
 def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
-    url = request.form.get('url')
     file = request.files.get('file')
     
     filename = None
     if file and file.filename != '':
         filename = secure_filename(file.filename)
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        
+        while True:
+            check_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
+            headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+            res = requests.get(check_url, headers=headers)
+            if res.status_code == 404:
+                break
+            filename = f"{base}_{counter}{ext}"
+            counter += 1
+
         file_bytes = file.read()
         encoded_content = base64.b64encode(file_bytes).decode('utf-8')
+        
         upload_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
-        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
         payload = {
-            "message": f"Upload {filename}",
+            "message": f"Upload {filename} via Web App",
             "content": encoded_content,
             "branch": GITHUB_BRANCH
         }
@@ -330,9 +492,10 @@ def add_item():
     if name:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, filename, url) VALUES (?, ?, ?, ?)", (name, category, filename, url))
+        cursor.execute("INSERT INTO items (name, category, filename) VALUES (?, ?, ?)", (name, category, filename))
         conn.commit()
         conn.close()
+        
         upload_db_to_github()
 
     return redirect(url_for('index'))
@@ -341,13 +504,30 @@ def add_item():
 def download_file(filename):
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
     headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+    
     res = requests.get(api_url, headers=headers)
     if res.status_code == 200:
         file_data = res.json()
         if 'content' in file_data:
             file_bytes = base64.b64decode(file_data['content'])
-            return send_file(io.BytesIO(file_bytes), download_name=filename, as_attachment=True)
-    return "ไม่พบไฟล์", 404
+            
+            # ตรวจสอบนามสกุลไฟล์เพื่อกำหนด mimetype ให้เบราว์เซอร์เล่นวิดีโอแบบสตรีมมิ่งได้ถูกต้อง
+            mimetype = 'application/octet-stream'
+            lower_name = filename.lower()
+            if lower_name.endswith('.mp4'):
+                mimetype = 'video/mp4'
+            elif lower_name.endswith('.webm'):
+                mimetype = 'video/webm'
+            elif lower_name.endswith('.ogg'):
+                mimetype = 'video/ogg'
+
+            return send_file(
+                io.BytesIO(file_bytes),
+                mimetype=mimetype,
+                download_name=filename,
+                as_attachment=False if lower_name.endswith(('.mp4', '.webm', '.ogg')) else True
+            )
+    return "ไม่พบไฟล์ หรือ Token ไม่มีสิทธิ์เข้าถึง", 404
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
@@ -359,27 +539,38 @@ def delete_item(item_id):
         filename = row[0]
         file_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/uploads/{filename}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+        
         res = requests.get(file_url, headers=headers)
         if res.status_code == 200:
             file_sha = res.json().get('sha')
-            requests.delete(file_url, headers=headers, json={"message": "Delete", "sha": file_sha, "branch": GITHUB_BRANCH})
+            delete_payload = {
+                "message": f"Delete {filename} via Web App",
+                "sha": file_sha,
+                "branch": GITHUB_BRANCH
+            }
+            requests.delete(file_url, headers=headers, json=delete_payload)
+            
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
+    
     upload_db_to_github()
+
     return redirect(url_for('index'))
 
 @app.route('/update_title', methods=['POST'])
 def update_title():
     data = request.get_json()
-    new_title = data.get('title')
+    new_title = data.get('title', '').strip()
     if new_title:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("UPDATE settings SET value = ? WHERE key = 'system_title'", (new_title,))
         conn.commit()
         conn.close()
+        
         upload_db_to_github()
+
         return jsonify({'status': 'success'})
     return jsonify({'status': 'error'}), 400
 
