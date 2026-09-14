@@ -443,14 +443,14 @@ def add_item():
             elif ext.lower() == '.m4a':
                 content_type = 'audio/mp4'
 
-            # อัปโหลดไฟล์ขึ้น Supabase Storage
+            # 1. อัปโหลดไฟล์ขึ้น Supabase Storage (ใช้ upsert=True เพื่อป้องกันข้อผิดพลาดซ้ำซ้อน)
             supabase.storage.from_(SUPABASE_BUCKET).upload(
                 path=unique_filename,
                 file=file_bytes,
-                file_options={"content-type": content_type}
+                file_options={"content-type": content_type, "upsert": "true"}
             )
             
-            # ดึง Public URL ของ Supabase อย่างปลอดภัย
+            # 2. ดึง Public URL ของ Supabase (รองรับทุกรูปแบบโครงสร้างข้อมูลที่ส่งกลับมา)
             public_url_res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
             
             if isinstance(public_url_res, dict):
