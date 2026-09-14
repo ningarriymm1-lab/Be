@@ -55,6 +55,8 @@ def init_db():
     download_db_from_github()
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # สร้างตาราง items ถ้ายังไม่มี
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +65,13 @@ def init_db():
             description TEXT
         )
     ''')
+    
+    # ตรวจสอบและเพิ่มคอลัมน์ description อัตโนมัติ กรณีที่ฐานข้อมูลเก่าไม่มีคอลัมน์นี้
+    cursor.execute("PRAGMA table_info(items)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'description' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN description TEXT")
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
