@@ -12,8 +12,8 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 
 DB_NAME = 'storage.db'
 
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzg1NDksImV4cCI6MjEwNDk1NDU0OX0.PRb5MCjAtRmpEhYMG0E1ZKruaTCikf0vyWUgSPWIet8').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4')
 SUPABASE_BUCKET = 'uploads' 
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
