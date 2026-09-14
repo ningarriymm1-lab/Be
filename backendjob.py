@@ -11,7 +11,6 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 
 DB_NAME = 'storage.db'
 
-# กำหนดค่า Supabase โดยดึงจาก Environment Variables เป็นหลัก
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
 SUPABASE_BUCKET = 'uploads' 
@@ -248,7 +247,7 @@ HTML_TEMPLATE = '''
 
                 <div class="card-actions">
                     {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
-                        <button type="button" class="card-btn btn-download" onclick="downloadFile('{{ item.file_url }}', '{{ item.name }}')">ดาวน์โหลด</button>
+                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>ดาวน์โหลด</a>
                     {% else %}
                         <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed;">ไม่มีไฟล์</span>
                     {% endif %}
@@ -259,4 +258,245 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
             {% endfor %}
-            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูลในเง
+            <div class="empty-state" id="emptyState" style="display: none;">ไม่พบข้อมูลในเงื่อนไขที่คุณค้นหา</div>
+        </div>
+    </div>
+
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
+            <form id="uploadForm" onsubmit="uploadFileWithProgress(event)">
+                <div class="form-group">
+                    <label>ชื่อที่แสดง</label>
+                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="ชื่อไฟล์...">
+                </div>
+                <div class="form-group">
+                    <label>หมวดหมู่</label>
+                    <select name="category" id="itemCategory" class="form-control">
+                        <option value="file">📁 ไฟล์ทั่วไป</option>
+                        <option value="audio">🎵 ไฟล์เสียง (.mp3, .wav, .m4a)</option>
+                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
+                        <option value="image">🖼️ รูปภาพ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>เลือกไฟล์จากเครื่อง</label>
+                    <div class="file-drop-area">
+                        <input type="file" name="file" id="fileInput" required onchange="handleFileSelect(this)">
+                        <div class="file-msg" id="fileMsg">📱 แตะที่นี่เพื่อเลือกไฟล์</div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
+                    <button type="submit" class="btn-primary">บันทึก</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentCategory = 'all';
+
+        function uploadFileWithProgress(event) {
+            event.preventDefault();
+            const form = document.getElementById('uploadForm');
+            const formData = new FormData(form);
+            const overlay = document.getElementById('loadingOverlay');
+            const progressBar = document.getElementById('progressBar');
+            const statusText = document.getElementById('uploadStatusText');
+
+            overlay.style.display = 'flex';
+            progressBar.style.width = '0%';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', "{{ url_for('add_item') }}", true);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentComplete + '%';
+                    statusText.innerText = `กำลังอัปโหลดไฟล์... ${percentComplete}%`;
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    window.location.reload();
+                } else {
+                    alert('เกิดข้อผิดพลาดในการอัปโหลด กรุณาลองใหม่อีกครั้ง');
+                    overlay.style.display = 'none';
+                }
+            };
+
+            xhr.onerror = function() {
+                alert('การเชื่อมต่อขัดข้อง');
+                overlay.style.display = 'none';
+            };
+
+            xhr.send(formData);
+        }
+        
+        const titleInput = document.getElementById('systemTitleInput');
+        let timeout = null;
+        titleInput.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                fetch('/update_title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: titleInput.value })
+                });
+            }, 500);
+        });
+
+        function handleFileSelect(input) {
+            const fileMsg = document.getElementById('fileMsg');
+            const nameInput = document.getElementById('itemName');
+            const categorySelect = document.getElementById('itemCategory');
+            if (input.files && input.files.length > 0) {
+                const file = input.files[0];
+                const fileName = file.name;
+                const lowerName = fileName.toLowerCase();
+                fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
+                
+                if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a') || lowerName.endsWith('.aac') || file.type.startsWith('audio/')) {
+                    categorySelect.value = 'audio';
+                } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
+                    categorySelect.value = 'zip';
+                } else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
+                    categorySelect.value = 'image';
+                } else {
+                    categorySelect.value = 'file';
+                }
+
+                if (!nameInput.value.trim()) nameInput.value = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+            }
+        }
+
+        function filterCategory(category, btnElement) {
+            currentCategory = category;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btnElement.classList.add('active');
+            handleSearch();
+        }
+
+        function handleSearch() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const cards = document.querySelectorAll('.item-card');
+            let visibleCount = 0;
+            cards.forEach(card => {
+                const cat = card.getAttribute('data-category');
+                const name = card.getAttribute('data-name');
+                if ((currentCategory === 'all' || cat === currentCategory) && name.includes(query)) {
+                    card.style.display = 'flex';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            document.getElementById('emptyState').style.display = visibleCount === 0 ? 'block' : 'none';
+        }
+
+        function openModal() { document.getElementById('addModal').classList.add('active'); }
+        function closeModal() { document.getElementById('addModal').classList.remove('active'); }
+    </script>
+</body>
+</html>
+'''
+
+init_db()
+
+@app.route('/')
+def index():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
+    row = cursor.fetchone()
+    system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
+    
+    cursor.execute("SELECT id, name, category, file_url FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'file_url': r[3]} for r in cursor.fetchall()]
+    conn.close()
+    return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
+
+@app.route('/add', methods=['POST'])
+def add_item():
+    name = request.form.get('name')
+    category = request.form.get('category')
+    file = request.files.get('file')
+    
+    file_url = None
+    if file and file.filename != '':
+        try:
+            original_filename = file.filename
+            ext = os.path.splitext(original_filename)[1]
+            unique_filename = f"{uuid.uuid4().hex}{ext}"
+            
+            file_bytes = file.read()
+            
+            content_type = file.content_type
+            if ext.lower() == '.mp3':
+                content_type = 'audio/mpeg'
+            elif ext.lower() == '.wav':
+                content_type = 'audio/wav'
+            elif ext.lower() == '.m4a':
+                content_type = 'audio/mp4'
+
+            supabase.storage.from_(SUPABASE_BUCKET).upload(
+                path=unique_filename,
+                file=file_bytes,
+                file_options={"content-type": content_type if content_type else 'application/octet-stream', "upsert": "true"}
+            )
+            
+            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
+                
+        except Exception as e:
+            print(f"Supabase upload error: {e}")
+
+    if name:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO items (name, category, file_url) VALUES (?, ?, ?)", (name, category, file_url))
+        conn.commit()
+        conn.close()
+        upload_db_to_github()
+
+    return jsonify({'status': 'success'})
+
+@app.route('/delete/<int:item_id>', methods=['POST'])
+def delete_item(item_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_url FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        try:
+            file_url = row[0]
+            filename = file_url.split('/')[-1].split('?')[0]
+            supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
+        except Exception as e:
+            print(f"Supabase file delete error: {e}")
+            
+    cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+    upload_db_to_github()
+    return redirect(url_for('index'))
+
+@app.route('/update_title', methods=['POST'])
+def update_title():
+    data = request.get_json()
+    new_title = data.get('title', '').strip()
+    if new_title:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE settings SET value = ? WHERE key = 'system_title'", (new_title,))
+        conn.commit()
+        conn.close()
+        upload_db_to_github()
+        return jsonify({'status': 'success'})
+    return jsonify({'status': 'error'}), 400
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
