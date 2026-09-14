@@ -236,18 +236,23 @@ HTML_TEMPLATE = '''
                     {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
 
-                {% if item.category == 'audio' and item.file_url %}
-                <audio controls preload="none">
-                    <source src="{{ item.file_url }}" type="audio/mpeg">
-                    <source src="{{ item.file_url }}" type="audio/mp3">
-                    เบราว์เซอร์ของคุณไม่รองรับการเล่นเสียง
-                </audio>
+                {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
+                    {% if item.category == 'audio' %}
+                    <audio controls preload="none">
+                        <source src="{{ item.file_url }}" type="audio/mpeg">
+                        <source src="{{ item.file_url }}" type="audio/mp3">
+                        เบราว์เซอร์ของคุณไม่รองรับการเล่นเสียง
+                    </audio>
+                    {% endif %}
                 {% endif %}
 
                 <div class="card-actions">
-                    {% if item.file_url %}
+                    {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
                         <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>ดาวน์โหลด</a>
+                    {% else %}
+                        <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed;">ไม่มีไฟล์</span>
                     {% endif %}
+                    
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
                     </form>
@@ -445,7 +450,7 @@ def add_item():
                 file_options={"content-type": content_type}
             )
             
-            # ปรับปรุงการดึง Public URL ให้รองรับทุกเวอร์ชันของไลบรารี Supabase Python
+            # ดึง Public URL ของ Supabase อย่างปลอดภัย
             public_url_res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
             
             if isinstance(public_url_res, dict):
