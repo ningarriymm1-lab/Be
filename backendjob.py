@@ -12,7 +12,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 DB_NAME = 'storage.db'
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
 SUPABASE_BUCKET = 'uploads' 
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -96,6 +96,7 @@ HTML_TEMPLATE = '''
             --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
             --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
             --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
+            --success: #81C995;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 15px; }
@@ -159,12 +160,16 @@ HTML_TEMPLATE = '''
         
         audio { width: 100%; height: 32px; margin-bottom: 8px; border-radius: 6px; }
 
-        .card-actions { display: flex; gap: 4px; width: 100%; margin-top: auto; }
-        .card-btn { padding: 5px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-actions { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-top: auto; }
+        .card-btn-row { display: flex; gap: 4px; width: 100%; }
+        .card-btn { padding: 6px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
         .btn-download:hover { background: var(--accent); color: #121212; }
-        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
+        .btn-use { background: rgba(129, 201, 149, 0.15); color: var(--success); flex: 1; }
+        .btn-use:hover { background: var(--success); color: #121212; }
+        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); width: 100%; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
+        
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
         
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
@@ -184,6 +189,13 @@ HTML_TEMPLATE = '''
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
+
+        /* Viewer Modal สำหรับกดใช้งาน */
+        #viewerModal .modal-content { max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; }
+        .viewer-body { flex: 1; overflow-y: auto; text-align: center; margin: 10px 0; }
+        .viewer-body img, .viewer-body video { max-width: 100%; max-height: 50vh; border-radius: 8px; object-fit: contain; }
+        .viewer-body audio { width: 100%; margin-top: 20px; }
+        .viewer-text-content { background: var(--bg-main); padding: 15px; border-radius: 8px; text-align: left; font-family: monospace; white-space: pre-wrap; max-height: 40vh; overflow-y: auto; font-size: 13px; color: var(--text-main); }
     </style>
 </head>
 <body>
@@ -246,14 +258,17 @@ HTML_TEMPLATE = '''
                 {% endif %}
 
                 <div class="card-actions">
-                    {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
-                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>ดาวน์โหลด</a>
-                    {% else %}
-                        <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed;">ไม่มีไฟล์</span>
-                    {% endif %}
+                    <div class="card-btn-row">
+                        {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
+                            <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>📥 โหลด</a>
+                            <button type="button" class="card-btn btn-use" onclick="useItem('{{ item.name|e }}', '{{ item.category }}', '{{ item.file_url }}')">▶️ ใช้</button>
+                        {% else %}
+                            <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed; flex: 1;">ไม่มีไฟล์</span>
+                        {% endif %}
+                    </div>
                     
-                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
-                        <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
+                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="width: 100%; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
+                        <button type="submit" class="card-btn btn-delete">ลบ</button>
                     </form>
                 </div>
             </div>
@@ -262,6 +277,7 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
+    <!-- Modal เพิ่มข้อมูล -->
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
@@ -291,6 +307,20 @@ HTML_TEMPLATE = '''
                     <button type="submit" class="btn-primary">บันทึก</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal กดใช้งาน (View / Preview) -->
+    <div class="modal" id="viewerModal">
+        <div class="modal-content">
+            <h3 id="viewerTitle">ใช้งานไฟล์</h3>
+            <div class="viewer-body" id="viewerBody">
+                <!-- เนื้อหาจะถูกแทรกด้วย JavaScript -->
+            </div>
+            <div class="modal-actions">
+                <a id="viewerDownloadBtn" href="#" class="btn-primary" target="_blank" download style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
+                <button type="button" class="btn-secondary" onclick="closeViewerModal()">ปิด</button>
+            </div>
         </div>
     </div>
 
@@ -399,6 +429,45 @@ HTML_TEMPLATE = '''
 
         function openModal() { document.getElementById('addModal').classList.add('active'); }
         function closeModal() { document.getElementById('addModal').classList.remove('active'); }
+
+        function useItem(name, category, url) {
+            document.getElementById('viewerTitle').innerText = "ใช้งาน: " + name;
+            document.getElementById('viewerDownloadBtn').href = url;
+            const body = document.getElementById('viewerBody');
+            body.innerHTML = '';
+
+            if (category === 'image' || url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+                body.innerHTML = `<img src="${url}" alt="${name}">`;
+            } else if (category === 'audio' || url.match(/\.(mp3|wav|m4a|aac)$/i)) {
+                body.innerHTML = `<audio controls autoplay><source src="${url}" type="audio/mpeg">เบราว์เซอร์ไม่รองรับเสียง</audio>`;
+            } else if (url.match(/\.(txt|json|md|py|html|css|js)$/i)) {
+                fetch(url)
+                    .then(res => res.text())
+                    .then(text => {
+                        body.innerHTML = `<div class="viewer-text-content">${escapeHtml(text)}</div>`;
+                    })
+                    .catch(() => {
+                        body.innerHTML = `<p style="color: var(--text-sub);">ไม่สามารถแสดงตัวอย่างข้อความได้ สามารถกดดาวน์โหลดไปใช้งานได้เลยครับ</p>`;
+                    });
+            } else {
+                body.innerHTML = `
+                    <div style="padding: 20px; color: var(--text-sub);">
+                        <p style="margin-bottom: 15px;">ไฟล์ประเภทนี้ไม่รองรับการแสดงตัวอย่างออนไลน์</p>
+                        <a href="${url}" class="btn-primary" target="_blank" download style="display: inline-block; text-decoration: none;">📥 กดเพื่อดาวน์โหลดและนำไปใช้งาน</a>
+                    </div>
+                `;
+            }
+            document.getElementById('viewerModal').classList.add('active');
+        }
+
+        function closeViewerModal() {
+            document.getElementById('viewerModal').classList.remove('active');
+            document.getElementById('viewerBody').innerHTML = '';
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
     </script>
 </body>
 </html>
