@@ -11,9 +11,9 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 
 DB_NAME = 'storage.db'
 
-# กำหนดค่า Supabase ของคุณ
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3MjQzOSwiZXhwIjoyMTA0OTQ4NDM5fQ.B_Lxtwy6qmUYqkDmRYZY4SNEASLhxD0D3US0KZtbrSk')
+# กำหนดค่า Supabase โดยดึงจาก Environment Variables เป็นหลัก ป้องกันข้อผิดพลาดและซีเกรตหลุด
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
 SUPABASE_BUCKET = 'uploads' 
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -355,12 +355,12 @@ HTML_TEMPLATE = '''
                 const lowerName = fileName.toLowerCase();
                 fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
                 
-                // ตรวจสอบนามสกุลไฟล์เพื่อเลือกหมวดหมู่ให้ถูกต้อง ไม่ให้สับสนแปลงไปเป็นวิดีโอหน้าดำ
+                // ตรวจสอบนามสกุลไฟล์ด้วย Regex ที่ปลอดภัยจาก Escape Warning
                 if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a') || lowerName.endsWith('.aac') || file.type.startsWith('audio/')) {
                     categorySelect.value = 'audio';
                 } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
                     categorySelect.value = 'zip';
-                } else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
+                } else if (lowerName.match(/\\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
                     categorySelect.value = 'image';
                 } else {
                     categorySelect.value = 'file';
