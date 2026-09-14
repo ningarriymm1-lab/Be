@@ -4,6 +4,7 @@ import os
 import base64
 import requests
 import uuid
+from urllib.parse import quote
 from supabase import create_client, Client
 
 app = Flask(__name__)
@@ -96,26 +97,18 @@ HTML_TEMPLATE = '''
             --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
             --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
             --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
-            --success: #81C995; --download-code: #FFD54F;
+            --success: #81C995;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 15px; }
         .container { max-width: 1000px; margin: 0 auto; }
-        header { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+        header { margin-bottom: 15px; }
         h1 { font-size: 24px; font-weight: 700; color: #FFFFFF; margin-bottom: 5px; }
         .editable-title {
             background: transparent; border: 1px dashed transparent; color: var(--text-sub);
             font-size: 14px; padding: 4px 8px; border-radius: 6px; width: 100%; max-width: 400px; transition: all 0.2s;
         }
         .editable-title:hover, .editable-title:focus { background: var(--bg-card); border-color: var(--accent); color: var(--text-main); outline: none; }
-        
-        .btn-download-code {
-            background-color: var(--download-code); color: #121212; border: none; padding: 8px 12px;
-            border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; text-decoration: none;
-            font-size: 12px; transition: opacity 0.2s;
-        }
-        .btn-download-code:hover { opacity: 0.9; }
-
         .toolbar {
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
             gap: 10px; margin-bottom: 15px; background-color: var(--bg-card); padding: 10px 14px;
@@ -198,6 +191,7 @@ HTML_TEMPLATE = '''
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
 
+        /* Viewer Modal สำหรับกดใช้งาน */
         #viewerModal .modal-content { max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; }
         .viewer-body { flex: 1; overflow-y: auto; text-align: center; margin: 10px 0; }
         .viewer-body img, .viewer-body video { max-width: 100%; max-height: 50vh; border-radius: 8px; object-fit: contain; }
@@ -217,11 +211,8 @@ HTML_TEMPLATE = '''
 
     <div class="container">
         <header>
-            <div>
-                <h1>ระบบเก็บข้อมูล</h1>
-                <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
-            </div>
-            <a href="{{ url_for('download_source_code') }}" class="btn-download-code">💾 โหลดไฟล์ Python (app.py)</a>
+            <h1>ระบบเก็บข้อมูล</h1>
+            <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
         </header>
 
         <div class="toolbar">
@@ -270,8 +261,8 @@ HTML_TEMPLATE = '''
                 <div class="card-actions">
                     <div class="card-btn-row">
                         {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
-                            <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>📥 โหลด</a>
-                            <button type="button" class="card-btn btn-use" onclick="useItem('{{ item.name|e }}', '{{ item.category }}', '{{ item.file_url }}')">▶️ ใช้</button>
+                            <a href="{{ url_for('download_file', item_id=item.id) }}" class="card-btn btn-download">📥 โหลด</a>
+                            <button type="button" class="card-btn btn-use" onclick="useItem('{{ item.name|e }}', '{{ item.category }}', '{{ item.file_url }}', {{ item.id }})">▶️ ใช้</button>
                         {% else %}
                             <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed; flex: 1;">ไม่มีไฟล์</span>
                         {% endif %}
@@ -287,6 +278,7 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
+    <!-- Modal เพิ่มข้อมูล -->
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
@@ -319,12 +311,15 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
+    <!-- Modal กดใช้งาน (View / Preview) -->
     <div class="modal" id="viewerModal">
         <div class="modal-content">
             <h3 id="viewerTitle">ใช้งานไฟล์</h3>
-            <div class="viewer-body" id="viewerBody"></div>
+            <div class="viewer-body" id="viewerBody">
+                <!-- เนื้อหาจะถูกแทรกด้วย JavaScript -->
+            </div>
             <div class="modal-actions">
-                <a id="viewerDownloadBtn" href="#" class="btn-primary" target="_blank" download style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
+                <a id="viewerDownloadBtn" href="#" class="btn-primary" style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
                 <button type="button" class="btn-secondary" onclick="closeViewerModal()">ปิด</button>
             </div>
         </div>
@@ -436,9 +431,9 @@ HTML_TEMPLATE = '''
         function openModal() { document.getElementById('addModal').classList.add('active'); }
         function closeModal() { document.getElementById('addModal').classList.remove('active'); }
 
-        function useItem(name, category, url) {
+        function useItem(name, category, url, id) {
             document.getElementById('viewerTitle').innerText = "ใช้งาน: " + name;
-            document.getElementById('viewerDownloadBtn').href = url;
+            document.getElementById('viewerDownloadBtn').href = '/download/' + id;
             const body = document.getElementById('viewerBody');
             body.innerHTML = '';
 
@@ -459,7 +454,7 @@ HTML_TEMPLATE = '''
                 body.innerHTML = `
                     <div style="padding: 20px; color: var(--text-sub);">
                         <p style="margin-bottom: 15px;">ไฟล์ประเภทนี้ไม่รองรับการแสดงตัวอย่างออนไลน์</p>
-                        <a href="${url}" class="btn-primary" target="_blank" download style="display: inline-block; text-decoration: none;">📥 กดเพื่อดาวน์โหลดและนำไปใช้งาน</a>
+                        <a href="/download/${id}" class="btn-primary" style="display: inline-block; text-decoration: none;">📥 กดเพื่อดาวน์โหลดและนำไปใช้งาน</a>
                     </div>
                 `;
             }
@@ -494,13 +489,46 @@ def index():
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
-@app.route('/download_code')
-def download_source_code():
-    script_path = __file__
+@app.route('/download/<int:item_id>')
+def download_file(item_id):
+    """
+    พร็อกซีดาวน์โหลดไฟล์ผ่านเซิร์ฟเวอร์ของเราเอง แทนที่จะลิงก์ตรงไป Supabase
+    (แก้ปัญหา: attribute "download" ใช้ไม่ได้ข้ามโดเมน ทำให้ไฟล์เปิดดูในแท็บใหม่
+    แทนที่จะดาวน์โหลดจริง)
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, file_url FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not row[1] or row[1] == 'None':
+        return "ไม่พบไฟล์ที่ต้องการดาวน์โหลด", 404
+
+    item_name, file_url = row
+
+    # ดึงนามสกุลไฟล์จาก URL จริงบน Supabase (เผื่อชื่อที่ผู้ใช้ตั้งไม่มีนามสกุล)
+    ext = os.path.splitext(file_url.split('?')[0])[1]
+    if ext and not item_name.lower().endswith(ext.lower()):
+        safe_name = f"{item_name}{ext}"
+    else:
+        safe_name = item_name or f"file{ext}"
+
+    try:
+        upstream = requests.get(file_url, timeout=60)
+        upstream.raise_for_status()
+    except Exception as e:
+        return f"ไม่สามารถดาวน์โหลดไฟล์จากที่เก็บข้อมูลได้: {e}", 502
+
+    content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
+    quoted_name = quote(safe_name)
+
     return Response(
-        open(script_path, 'rb').read(),
-        mimetype="text/plain",
-        headers={"Content-disposition": "attachment; filename=app.py"}
+        upstream.content,
+        mimetype=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{quoted_name}\"; filename*=UTF-8''{quoted_name}"
+        }
     )
 
 @app.route('/add', methods=['POST'])
