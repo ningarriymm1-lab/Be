@@ -364,7 +364,7 @@ HTML_TEMPLATE = '''
                     categorySelect.value = 'audio';
                 } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
                     categorySelect.value = 'zip';
-                } else if (lowerName.match(/\\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
+                } else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
                     categorySelect.value = 'image';
                 } else {
                     categorySelect.value = 'file';
@@ -508,4 +508,5 @@ def update_title():
     return jsonify({'status': 'error'}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
