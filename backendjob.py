@@ -1,17 +1,27 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify, Response
 import sqlite3
 import os
 import base64
 import requests
 import uuid
+from urllib.parse import quote
+from supabase import create_client, Client
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB
 
 DB_NAME = 'storage.db'
-UPLOAD_FOLDER = 'static/uploads'
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# --- เก็บไฟล์บน Supabase Storage (คลาวด์ถาวร) แทนการเซฟลงดิสก์ของเซิร์ฟเวอร์ ---
+# เหตุผล: ดิสก์ของเซิร์ฟเวอร์ (เช่น Railway/Render) เป็นพื้นที่ชั่วคราว (ephemeral)
+# ทุกครั้งที่ redeploy/restart ไฟล์ที่เซฟไว้ในดิสก์จะหายหมด มีแค่ storage.db
+# ที่รอดเพราะถูก backup ไป GitHub เท่านั้น การย้ายไฟล์ไป Supabase Storage
+# (อยู่นอกคอนเทนเนอร์) ทำให้ทั้งไฟล์และข้อมูลอยู่ถาวรไม่หายอีกต่อไป
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzg1NDksImV4cCI6MjEwNDk1NDU0OX0.PRb5MCjAtRmpEhYMG0E1ZKruaTCikf0vyWUgSPWIet8').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4')
+SUPABASE_BUCKET = 'uploads'
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
@@ -175,7 +185,6 @@ HTML_TEMPLATE = '''
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; }
         
-        /* หน้าต่างแสดงสถานะความคืบหน้าอัปโหลดแบบเรียลไทม์ */
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
@@ -188,7 +197,7 @@ HTML_TEMPLATE = '''
         <div class="progress-container">
             <div class="progress-bar" id="progressBar"></div>
         </div>
-        <div style="font-size: 12px; color: var(--text-sub);">กำลังส่งข้อมูลด้วยความเร็วสูงสุด...</div>
+        <div style="font-size: 12px; color: var(--text-sub);">กำลังบันทึกไฟล์ไปยังที่เก็บข้อมูลถาวร...</div>
     </div>
 
     <div class="container">
@@ -228,7 +237,7 @@ HTML_TEMPLATE = '''
                 </div>
                 <div class="card-actions">
                     {% if item.file_url %}
-                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
+                        <a href="{{ url_for('download_file', item_id=item.id) }}" class="card-btn btn-download">ดาวน์โหลด</a>
                     {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
@@ -387,31 +396,69 @@ def index():
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
+@app.route('/download/<int:item_id>')
+def download_file(item_id):
+    """
+    พร็อกซีดาวน์โหลดไฟล์ผ่านเซิร์ฟเวอร์ของเราเอง แทนที่จะลิงก์ตรงไป Supabase
+    (attribute "download" ใช้ไม่ได้ข้ามโดเมน ไฟล์จะเปิดในแท็บใหม่แทนที่จะดาวน์โหลดจริง)
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, file_url FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not row[1] or row[1] == 'None':
+        return "ไม่พบไฟล์ที่ต้องการดาวน์โหลด", 404
+
+    item_name, file_url = row
+    ext = os.path.splitext(file_url.split('?')[0])[1]
+    safe_name = item_name if item_name.lower().endswith(ext.lower()) else f"{item_name}{ext}"
+
+    try:
+        upstream = requests.get(file_url, timeout=60)
+        upstream.raise_for_status()
+    except Exception as e:
+        return f"ไม่สามารถดาวน์โหลดไฟล์จากที่เก็บข้อมูลได้: {e}", 502
+
+    content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
+    quoted_name = quote(safe_name)
+
+    return Response(
+        upstream.content,
+        mimetype=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{quoted_name}\"; filename*=UTF-8''{quoted_name}"
+        }
+    )
+
 @app.route('/add', methods=['POST'])
 def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
     file = request.files.get('file')
-    
+
     file_url = None
     if file and file.filename != '':
         try:
             original_filename = file.filename
             ext = os.path.splitext(original_filename)[1]
             unique_filename = f"{uuid.uuid4().hex}{ext}"
-            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-            
-            # ใช้ Buffer ขนาดใหญ่ (10MB) ในการบันทึกไฟล์ลงดิสก์เพื่อให้ความเร็วสูงสุด
-            with open(file_path, 'wb') as f:
-                while True:
-                    chunk = file.stream.read(10 * 1024 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    
-            file_url = f"/{file_path}"
+
+            file_bytes = file.read()
+
+            content_type = file.content_type or 'application/octet-stream'
+
+            # อัปโหลดไฟล์ขึ้น Supabase Storage (พื้นที่คลาวด์ถาวร) แทนการเขียนลงดิสก์
+            supabase.storage.from_(SUPABASE_BUCKET).upload(
+                path=unique_filename,
+                file=file_bytes,
+                file_options={"content-type": content_type, "upsert": "true"}
+            )
+
+            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
         except Exception as e:
-            print(f"Local save error: {e}")
+            print(f"Supabase upload error: {e}")
 
     if name:
         conn = sqlite3.connect(DB_NAME)
@@ -431,12 +478,12 @@ def delete_item(item_id):
     row = cursor.fetchone()
     if row and row[0]:
         try:
-            file_path = row[0].lstrip('/')
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            file_url = row[0]
+            filename = file_url.split('/')[-1].split('?')[0]
+            supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
         except Exception as e:
-            print(f"File delete error: {e}")
-            
+            print(f"Supabase file delete error: {e}")
+
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
@@ -458,4 +505,5 @@ def update_title():
     return jsonify({'status': 'error'}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
