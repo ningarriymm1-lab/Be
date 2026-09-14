@@ -273,7 +273,7 @@ HTML_TEMPLATE = '''
                             <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank" download>📥 โหลด</a>
                             <button type="button" class="card-btn btn-use" onclick="useItem('{{ item.name|e }}', '{{ item.category }}', '{{ item.file_url }}')">▶️ ใช้</button>
                         {% else %}
-                            <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed; flex: 1;">ไม่มีไฟล์</span>
+                            <a href="{{ url_for('download_empty_item', item_id=item.id) }}" class="card-btn btn-download" style="flex: 1;">📥 โหลด</a>
                         {% endif %}
                     </div>
                     
@@ -496,12 +496,28 @@ def index():
 
 @app.route('/download_code')
 def download_source_code():
-    # สร้างเส้นทางดาวน์โหลดไฟล์โค้ดตัวมันเอง (app.py) ลงเครื่อง
     script_path = __file__
     return Response(
         open(script_path, 'rb').read(),
         mimetype="text/plain",
         headers={"Content-disposition": "attachment; filename=app.py"}
+    )
+
+@app.route('/download_empty/<int:item_id>')
+def download_empty_item(item_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    item_name = row[0] if row else "data"
+    content = f"ข้อมูลชื่อรายการ: {item_name}\n(รายการนี้ถูกสร้างขึ้นในระบบ แต่ยังไม่มีการอัปโหลดไฟล์จริง)"
+    
+    return Response(
+        content,
+        mimetype="text/plain",
+        headers={"Content-disposition": f"attachment; filename={item_name}.txt"}
     )
 
 @app.route('/add', methods=['POST'])
