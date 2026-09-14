@@ -1,22 +1,12 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify, Response
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify
 import sqlite3
 import os
 import base64
 import requests
-import uuid
-from urllib.parse import quote
-from supabase import create_client, Client
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดสูงสุด 500MB
 
 DB_NAME = 'storage.db'
-
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzg1NDksImV4cCI6MjEwNDk1NDU0OX0.PRb5MCjAtRmpEhYMG0E1ZKruaTCikf0vyWUgSPWIet8').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4')
-SUPABASE_BUCKET = 'uploads' 
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
@@ -70,7 +60,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            file_url TEXT
+            description TEXT
         )
     ''')
     cursor.execute('''
@@ -150,25 +140,18 @@ HTML_TEMPLATE = '''
 
         .card {
             background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-            padding: 10px; position: relative; transition: transform 0.2s, border-color 0.2s;
-            display: flex; flex-direction: column; align-items: center; text-align: center;
+            padding: 12px; position: relative; transition: transform 0.2s, border-color 0.2s;
+            display: flex; flex-direction: column; align-items: flex-start; text-align: left;
             height: 100%; overflow: hidden;
         }
         .card:hover { transform: translateY(-3px); border-color: var(--accent); }
-        .card-icon { font-size: 28px; margin-bottom: 6px; height: 40px; display: flex; align-items: center; justify-content: center; }
-        .card-title { font-size: 13px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-title { font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 10px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
-        
-        audio { width: 100%; height: 32px; margin-bottom: 8px; border-radius: 6px; }
+        .card-desc { font-size: 12px; color: var(--text-sub); margin-bottom: 12px; word-break: break-word; flex: 1; }
 
         .card-actions { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-top: auto; }
-        .card-btn-row { display: flex; gap: 4px; width: 100%; }
-        .card-btn { padding: 6px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
-        .btn-download:hover { background: var(--accent); color: #121212; }
-        .btn-use { background: rgba(129, 201, 149, 0.15); color: var(--success); flex: 1; }
-        .btn-use:hover { background: var(--success); color: #121212; }
-        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); width: 100%; }
+        .card-btn { padding: 6px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; width: 100%; }
+        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); }
         .btn-delete:hover { background: var(--danger); color: #121212; }
         
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
@@ -181,32 +164,12 @@ HTML_TEMPLATE = '''
         .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 5px; font-weight: 500; }
         .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 9px 12px; border-radius: 8px; font-size: 13px; outline: none; }
         .form-control:focus { border-color: var(--accent); }
-        .file-drop-area { border: 2px dashed var(--border); border-radius: 10px; padding: 16px; text-align: center; background: var(--bg-main); cursor: pointer; position: relative; }
-        .file-drop-area input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-        .file-msg { font-size: 12px; color: var(--text-sub); pointer-events: none; }
+        textarea.form-control { resize: vertical; min-height: 80px; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; }
-        
-        #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
-        .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
-        .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
-
-        #viewerModal .modal-content { max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; }
-        .viewer-body { flex: 1; overflow-y: auto; text-align: center; margin: 10px 0; }
-        .viewer-body img, .viewer-body video { max-width: 100%; max-height: 50vh; border-radius: 8px; object-fit: contain; }
-        .viewer-body audio { width: 100%; margin-top: 20px; }
-        .viewer-text-content { background: var(--bg-main); padding: 15px; border-radius: 8px; text-align: left; font-family: monospace; white-space: pre-wrap; max-height: 40vh; overflow-y: auto; font-size: 13px; color: var(--text-main); }
     </style>
 </head>
 <body>
-
-    <div id="loadingOverlay">
-        <div style="font-weight: 600;" id="uploadStatusText">กำลังอัปโหลดไฟล์ไป Supabase... 0%</div>
-        <div class="progress-container">
-            <div class="progress-bar" id="progressBar"></div>
-        </div>
-        <div style="font-size: 12px; color: var(--text-sub);">กำลังบันทึกข้อมูลและสำรองระบบ...</div>
-    </div>
 
     <div class="container">
         <header>
@@ -218,10 +181,9 @@ HTML_TEMPLATE = '''
             <div class="toolbar-left">
                 <div class="tabs">
                     <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
-                    <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์ทั่วไป</button>
-                    <button class="tab-btn" onclick="filterCategory('audio', this)">🎵 เสียง (MP3)</button>
-                    <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
-                    <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
+                    <button class="tab-btn" onclick="filterCategory('note', this)">📝 บันทึก</button>
+                    <button class="tab-btn" onclick="filterCategory('link', this)">🔗 ลิงก์</button>
+                    <button class="tab-btn" onclick="filterCategory('other', this)">📌 อื่นๆ</button>
                 </div>
             </div>
             <div class="actions">
@@ -233,40 +195,15 @@ HTML_TEMPLATE = '''
         <div class="grid-container" id="itemGrid">
             {% for item in items %}
             <div class="card item-card" data-category="{{ item.category }}" data-name="{{ item.name | lower }}">
-                <div class="card-icon">
-                    {% if item.category == 'image' %}🖼️
-                    {% elif item.category == 'audio' %}🎵
-                    {% elif item.category == 'zip' %}📦
-                    {% else %}📁{% endif %}
-                </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
-                    {% if item.category == 'image' %}รูปภาพ
-                    {% elif item.category == 'audio' %}เสียง (MP3)
-                    {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
-                    {% else %}ไฟล์ทั่วไป{% endif %}
+                    {% if item.category == 'note' %}บันทึก
+                    {% elif item.category == 'link' %}ลิงก์
+                    {% else %}อื่นๆ{% endif %}
                 </div>
-
-                {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
-                    {% if item.category == 'audio' %}
-                    <audio controls preload="none">
-                        <source src="{{ item.file_url }}" type="audio/mpeg">
-                        <source src="{{ item.file_url }}" type="audio/mp3">
-                        เบราว์เซอร์ของคุณไม่รองรับการเล่นเสียง
-                    </audio>
-                    {% endif %}
-                {% endif %}
+                <div class="card-desc">{{ item.description }}</div>
 
                 <div class="card-actions">
-                    <div class="card-btn-row">
-                        {% if item.file_url and item.file_url != 'None' and item.file_url != '' %}
-                            <a href="{{ url_for('download_file', item_id=item.id) }}" class="card-btn btn-download">📥 โหลด</a>
-                            <button type="button" class="card-btn btn-use" onclick="useItem('{{ item.name|e }}', '{{ item.category }}', '{{ item.file_url }}', {{ item.id }})">▶️ ใช้</button>
-                        {% else %}
-                            <span class="card-btn btn-download" style="opacity: 0.5; cursor: not-allowed; flex: 1;">ไม่มีไฟล์</span>
-                        {% endif %}
-                    </div>
-                    
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="width: 100%; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete">ลบ</button>
                     </form>
@@ -279,27 +216,23 @@ HTML_TEMPLATE = '''
 
     <div class="modal" id="addModal">
         <div class="modal-content">
-            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
-            <form id="uploadForm" onsubmit="uploadFileWithProgress(event)">
+            <h3>📌 เพิ่มข้อมูลใหม่</h3>
+            <form action="{{ url_for('add_item') }}" method="POST">
                 <div class="form-group">
-                    <label>ชื่อที่แสดง</label>
-                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="ชื่อไฟล์...">
+                    <label>หัวข้อ</label>
+                    <input type="text" name="name" class="form-control" required placeholder="ชื่อหัวข้อ...">
                 </div>
                 <div class="form-group">
                     <label>หมวดหมู่</label>
-                    <select name="category" id="itemCategory" class="form-control">
-                        <option value="file">📁 ไฟล์ทั่วไป</option>
-                        <option value="audio">🎵 ไฟล์เสียง (.mp3, .wav, .m4a)</option>
-                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
-                        <option value="image">🖼️ รูปภาพ</option>
+                    <select name="category" class="form-control">
+                        <option value="note">📝 บันทึก</option>
+                        <option value="link">🔗 ลิงก์</option>
+                        <option value="other">📌 อื่นๆ</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>เลือกไฟล์จากเครื่อง</label>
-                    <div class="file-drop-area">
-                        <input type="file" name="file" id="fileInput" required onchange="handleFileSelect(this)">
-                        <div class="file-msg" id="fileMsg">📱 แตะที่นี่เพื่อเลือกไฟล์</div>
-                    </div>
+                    <label>รายละเอียด / ข้อมูล</label>
+                    <textarea name="description" class="form-control" placeholder="พิมพ์รายละเอียดที่นี่..."></textarea>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
@@ -309,59 +242,9 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <div class="modal" id="viewerModal">
-        <div class="modal-content">
-            <h3 id="viewerTitle">ใช้งานไฟล์</h3>
-            <div class="viewer-body" id="viewerBody"></div>
-            <div class="modal-actions">
-                <a id="viewerDownloadBtn" href="#" class="btn-primary" style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
-                <button type="button" class="btn-secondary" onclick="closeViewerModal()">ปิด</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         let currentCategory = 'all';
 
-        function uploadFileWithProgress(event) {
-            event.preventDefault();
-            const form = document.getElementById('uploadForm');
-            const formData = new FormData(form);
-            const overlay = document.getElementById('loadingOverlay');
-            const progressBar = document.getElementById('progressBar');
-            const statusText = document.getElementById('uploadStatusText');
-
-            overlay.style.display = 'flex';
-            progressBar.style.width = '0%';
-
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', "{{ url_for('add_item') }}", true);
-
-            xhr.upload.onprogress = function(e) {
-                if (e.lengthComputable) {
-                    const percentComplete = Math.round((e.loaded / e.total) * 100);
-                    progressBar.style.width = percentComplete + '%';
-                    statusText.innerText = `กำลังอัปโหลดไฟล์... ${percentComplete}%`;
-                }
-            };
-
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    window.location.reload();
-                } else {
-                    alert('เกิดข้อผิดพลาดในการอัปโหลด กรุณาลองใหม่อีกครั้ง');
-                    overlay.style.display = 'none';
-                }
-            };
-
-            xhr.onerror = function() {
-                alert('การเชื่อมต่อขัดข้อง');
-                overlay.style.display = 'none';
-            };
-
-            xhr.send(formData);
-        }
-        
         const titleInput = document.getElementById('systemTitleInput');
         let timeout = null;
         titleInput.addEventListener('input', () => {
@@ -374,30 +257,6 @@ HTML_TEMPLATE = '''
                 });
             }, 500);
         });
-
-        function handleFileSelect(input) {
-            const fileMsg = document.getElementById('fileMsg');
-            const nameInput = document.getElementById('itemName');
-            const categorySelect = document.getElementById('itemCategory');
-            if (input.files && input.files.length > 0) {
-                const file = input.files[0];
-                const fileName = file.name;
-                const lowerName = fileName.toLowerCase();
-                fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
-                
-                if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a') || lowerName.endsWith('.aac') || file.type.startsWith('audio/')) {
-                    categorySelect.value = 'audio';
-                } else if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar') || lowerName.endsWith('.7z')) {
-                    categorySelect.value = 'zip';
-                } else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/) || file.type.startsWith('image/')) {
-                    categorySelect.value = 'image';
-                } else {
-                    categorySelect.value = 'file';
-                }
-
-                if (!nameInput.value.trim()) nameInput.value = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
-            }
-        }
 
         function filterCategory(category, btnElement) {
             currentCategory = category;
@@ -425,45 +284,6 @@ HTML_TEMPLATE = '''
 
         function openModal() { document.getElementById('addModal').classList.add('active'); }
         function closeModal() { document.getElementById('addModal').classList.remove('active'); }
-
-        function useItem(name, category, url, id) {
-            document.getElementById('viewerTitle').innerText = "ใช้งาน: " + name;
-            document.getElementById('viewerDownloadBtn').href = '/download/' + id;
-            const body = document.getElementById('viewerBody');
-            body.innerHTML = '';
-
-            if (category === 'image' || url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-                body.innerHTML = `<img src="${url}" alt="${name}">`;
-            } else if (category === 'audio' || url.match(/\.(mp3|wav|m4a|aac)$/i)) {
-                body.innerHTML = `<audio controls autoplay><source src="${url}" type="audio/mpeg">เบราว์เซอร์ไม่รองรับเสียง</audio>`;
-            } else if (url.match(/\.(txt|json|md|py|html|css|js)$/i)) {
-                fetch(url)
-                    .then(res => res.text())
-                    .then(text => {
-                        body.innerHTML = `<div class="viewer-text-content">${escapeHtml(text)}</div>`;
-                    })
-                    .catch(() => {
-                        body.innerHTML = `<p style="color: var(--text-sub);">ไม่สามารถแสดงตัวอย่างข้อความได้ สามารถกดดาวน์โหลดไปใช้งานได้เลยครับ</p>`;
-                    });
-            } else {
-                body.innerHTML = `
-                    <div style="padding: 20px; color: var(--text-sub);">
-                        <p style="margin-bottom: 15px;">ไฟล์ประเภทนี้ไม่รองรับการแสดงตัวอย่างออนไลน์</p>
-                        <a href="/download/${id}" class="btn-primary" style="display: inline-block; text-decoration: none;">📥 กดเพื่อดาวน์โหลดและนำไปใช้งาน</a>
-                    </div>
-                `;
-            }
-            document.getElementById('viewerModal').classList.add('active');
-        }
-
-        function closeViewerModal() {
-            document.getElementById('viewerModal').classList.remove('active');
-            document.getElementById('viewerBody').innerHTML = '';
-        }
-
-        function escapeHtml(text) {
-            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-        }
     </script>
 </body>
 </html>
@@ -479,105 +299,31 @@ def index():
     row = cursor.fetchone()
     system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
     
-    cursor.execute("SELECT id, name, category, file_url FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'file_url': r[3]} for r in cursor.fetchall()]
+    cursor.execute("SELECT id, name, category, description FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'description': r[3]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
-
-@app.route('/download/<int:item_id>')
-def download_file(item_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, file_url FROM items WHERE id = ?", (item_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row or not row[1] or row[1] == 'None' or row[1].strip() == '':
-        return "ไม่พบไฟล์ที่ต้องการดาวน์โหลด", 404
-
-    item_name, file_url = row
-
-    ext = os.path.splitext(file_url.split('?')[0])[1]
-    if ext and not item_name.lower().endswith(ext.lower()):
-        safe_name = f"{item_name}{ext}"
-    else:
-        safe_name = item_name or f"file{ext}"
-
-    try:
-        upstream = requests.get(file_url, timeout=60)
-        upstream.raise_for_status()
-    except Exception as e:
-        return f"ไม่สามารถดาวน์โหลดไฟล์จากที่เก็บข้อมูลได้: {e}", 502
-
-    content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
-    quoted_name = quote(safe_name)
-
-    return Response(
-        upstream.content,
-        mimetype=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{quoted_name}\"; filename*=UTF-8''{quoted_name}"
-        }
-    )
 
 @app.route('/add', methods=['POST'])
 def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
-    file = request.files.get('file')
+    description = request.form.get('description')
     
-    file_url = None
-    if file and file.filename != '':
-        try:
-            original_filename = file.filename
-            ext = os.path.splitext(original_filename)[1]
-            unique_filename = f"{uuid.uuid4().hex}{ext}"
-            
-            file_bytes = file.read()
-            
-            content_type = file.content_type
-            if ext.lower() == '.mp3':
-                content_type = 'audio/mpeg'
-            elif ext.lower() == '.wav':
-                content_type = 'audio/wav'
-            elif ext.lower() == '.m4a':
-                content_type = 'audio/mp4'
-
-            supabase.storage.from_(SUPABASE_BUCKET).upload(
-                path=unique_filename,
-                file=file_bytes,
-                file_options={"content-type": content_type if content_type else 'application/octet-stream', "upsert": "true"}
-            )
-            
-            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
-                
-        except Exception as e:
-            print(f"Supabase upload error: {e}")
-
     if name:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, file_url) VALUES (?, ?, ?)", (name, category, file_url))
+        cursor.execute("INSERT INTO items (name, category, description) VALUES (?, ?, ?)", (name, category, description))
         conn.commit()
         conn.close()
         upload_db_to_github()
 
-    return jsonify({'status': 'success'})
+    return redirect(url_for('index'))
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT file_url FROM items WHERE id = ?", (item_id,))
-    row = cursor.fetchone()
-    if row and row[0]:
-        try:
-            file_url = row[0]
-            filename = file_url.split('/')[-1].split('?')[0]
-            supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
-        except Exception as e:
-            print(f"Supabase file delete error: {e}")
-            
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
