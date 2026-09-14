@@ -12,7 +12,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 DB_NAME = 'storage.db'
 
 # กำหนดค่า Supabase โดยดึงจาก Environment Variables เป็นหลัก
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://nucsslahsffamnwosafm.supabase.co').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51Y3NzbGFoc2ZmYW1ud29zYWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNzI0MzksImV4cCI6MjEwNDk0ODQzOX0.8ZLPmkNNjW6v_oyw34NjXIsqFLc-sVL5qUj_qVA7-8I')
 SUPABASE_BUCKET = 'uploads' 
 
@@ -447,18 +447,11 @@ def add_item():
             supabase.storage.from_(SUPABASE_BUCKET).upload(
                 path=unique_filename,
                 file=file_bytes,
-                file_options={"content-type": content_type, "upsert": "true"}
+                file_options={"content-type": content-type if 'content-type' in locals() else 'application/octet-stream', "upsert": "true"}
             )
             
-            # 2. ดึง Public URL ของ Supabase (รองรับทุกรูปแบบโครงสร้างข้อมูลที่ส่งกลับมา)
-            public_url_res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(unique_filename)
-            
-            if isinstance(public_url_res, dict):
-                file_url = public_url_res.get('publicUrl') or public_url_res.get('data', {}).get('publicUrl')
-            elif hasattr(public_url_res, 'public_url'):
-                file_url = public_url_res.public_url
-            else:
-                file_url = str(public_url_res)
+            # 2. ประกอบ URL ตรงจากโครงสร้างมาตรฐานของ Supabase เพื่อความแม่นยำสูงสุด 100%
+            file_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{unique_filename}"
                 
         except Exception as e:
             print(f"Supabase upload error: {e}")
