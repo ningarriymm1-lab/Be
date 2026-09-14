@@ -191,7 +191,6 @@ HTML_TEMPLATE = '''
         .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
         .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
 
-        /* Viewer Modal สำหรับกดใช้งาน */
         #viewerModal .modal-content { max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; }
         .viewer-body { flex: 1; overflow-y: auto; text-align: center; margin: 10px 0; }
         .viewer-body img, .viewer-body video { max-width: 100%; max-height: 50vh; border-radius: 8px; object-fit: contain; }
@@ -278,7 +277,6 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Modal เพิ่มข้อมูล -->
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
@@ -311,13 +309,10 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Modal กดใช้งาน (View / Preview) -->
     <div class="modal" id="viewerModal">
         <div class="modal-content">
             <h3 id="viewerTitle">ใช้งานไฟล์</h3>
-            <div class="viewer-body" id="viewerBody">
-                <!-- เนื้อหาจะถูกแทรกด้วย JavaScript -->
-            </div>
+            <div class="viewer-body" id="viewerBody"></div>
             <div class="modal-actions">
                 <a id="viewerDownloadBtn" href="#" class="btn-primary" style="text-decoration: none; padding: 6px 12px; font-size: 13px;">ดาวน์โหลดไฟล์นี้</a>
                 <button type="button" class="btn-secondary" onclick="closeViewerModal()">ปิด</button>
@@ -491,23 +486,17 @@ def index():
 
 @app.route('/download/<int:item_id>')
 def download_file(item_id):
-    """
-    พร็อกซีดาวน์โหลดไฟล์ผ่านเซิร์ฟเวอร์ของเราเอง แทนที่จะลิงก์ตรงไป Supabase
-    (แก้ปัญหา: attribute "download" ใช้ไม่ได้ข้ามโดเมน ทำให้ไฟล์เปิดดูในแท็บใหม่
-    แทนที่จะดาวน์โหลดจริง)
-    """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT name, file_url FROM items WHERE id = ?", (item_id,))
     row = cursor.fetchone()
     conn.close()
 
-    if not row or not row[1] or row[1] == 'None':
+    if not row or not row[1] or row[1] == 'None' or row[1].strip() == '':
         return "ไม่พบไฟล์ที่ต้องการดาวน์โหลด", 404
 
     item_name, file_url = row
 
-    # ดึงนามสกุลไฟล์จาก URL จริงบน Supabase (เผื่อชื่อที่ผู้ใช้ตั้งไม่มีนามสกุล)
     ext = os.path.splitext(file_url.split('?')[0])[1]
     if ext and not item_name.lower().endswith(ext.lower()):
         safe_name = f"{item_name}{ext}"
