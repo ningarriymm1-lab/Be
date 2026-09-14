@@ -3,12 +3,13 @@ import sqlite3
 import os
 import base64
 import requests
-import io
 
 app = Flask(__name__)
 DB_NAME = 'storage.db'
+UPLOAD_FOLDER = 'static/uploads'
 
-# กำหนดค่า GitHub API สำหรับเก็บฐานข้อมูล (ข้อมูลไม่หายแน่นอน)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
@@ -17,7 +18,7 @@ def download_db_from_github():
     try:
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        res = requests.get(api_url, headers=headers)
+        res = requests.get(api_url, headers=headers, timeout=15)
         if res.status_code == 200:
             file_data = res.json()
             if 'content' in file_data:
@@ -29,13 +30,12 @@ def download_db_from_github():
         print(f"ไม่สามารถดาวน์โหลด DB ได้: {e}")
 
 def upload_db_to_github():
-    """ สำรองฐานข้อมูลขึ้น GitHub ทันที (ขนาดไฟล์หลัก KB อัปโหลดไวมาก) """
     try:
         if not os.path.exists(DB_NAME):
             return
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        res = requests.get(api_url, headers=headers)
+        res = requests.get(api_url, headers=headers, timeout=15)
         sha = res.json().get('sha') if res.status_code == 200 else None
         
         with open(DB_NAME, 'rb') as f:
@@ -50,7 +50,7 @@ def upload_db_to_github():
         if sha:
             payload["sha"] = sha
             
-        requests.put(api_url, headers=headers, json=payload)
+        requests.put(api_url, headers=headers, json=payload, timeout=15)
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการอัปโหลด DB: {e}")
 
@@ -66,13 +66,6 @@ def init_db():
             file_url TEXT
         )
     ''')
-    
-    # อัปเกรดตารางเก่าให้รองรับเก็บ URL ตรง
-    cursor.execute("PRAGMA table_info(items)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'filename' in columns and 'file_url' not in columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN file_url TEXT")
-        
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -169,8 +162,6 @@ HTML_TEMPLATE = '''
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 14px; }
         .video-modal-content { max-width: 700px; text-align: center; }
         .video-modal-content video { width: 100%; border-radius: 8px; max-height: 450px; background: #000; margin-bottom: 12px; }
-        
-        /* Loading Overlay เมื่อกดอัปโหลด */
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 16px; gap: 15px; }
         .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top: 4px solid var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -180,7 +171,7 @@ HTML_TEMPLATE = '''
 
     <div id="loadingOverlay">
         <div class="spinner"></div>
-        <div>กำลังอัปโหลดไฟล์เข้าระบบ กรุณารอสักครู่...</div>
+        <div>กำลังบันทึกข้อมูล กรุณารอสักครู่...</div>
     </div>
 
     <div class="container">
@@ -241,7 +232,6 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Modal เพิ่มไฟล์ -->
     <div class="modal" id="addModal">
         <div class="modal-content">
             <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
@@ -269,13 +259,12 @@ HTML_TEMPLATE = '''
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
-                    <button type="submit" class="btn-primary">อัปโหลด</button>
+                    <button type="submit" class="btn-primary">บันทึก</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Modal เล่นวิดีโอ -->
     <div class="modal" id="videoModal">
         <div class="modal-content video-modal-content">
             <h3 id="videoModalTitle">🎬 เล่นวิดีโอ</h3>
@@ -391,14 +380,12 @@ def add_item():
     file_url = None
     if file and file.filename != '':
         try:
-            # ส่งไฟล์ไปฝากไว้ที่ Catbox.moe (อัปโหลดไวมาก รองรับไฟล์ใหญ่ระดับ GB)
-            files = {'fileToUpload': (file.filename, file.read(), file.content_type)}
-            data = {'reqtype': 'fileupload'}
-            response = requests.post('https://catbox.moe/user/api.php', files=files, data=data, timeout=60)
-            if response.status_code == 200:
-                file_url = response.text.strip() # ได้ลิงก์ตรงของไฟล์กลับมาทันที
+            filename = file.filename
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+            file_url = f"/{file_path}"
         except Exception as e:
-            print(f"Upload error: {e}")
+            print(f"Local save error: {e}")
 
     if name:
         conn = sqlite3.connect(DB_NAME)
@@ -406,8 +393,6 @@ def add_item():
         cursor.execute("INSERT INTO items (name, category, file_url) VALUES (?, ?, ?)", (name, category, file_url))
         conn.commit()
         conn.close()
-        
-        # สำรองฐานข้อมูลขึ้น GitHub ทันที (เพราะฐานข้อมูลขนาดจิ๋ว อัปโหลดเสร็จใน 1 วินาที ข้อมูลไม่มีวันหาย)
         upload_db_to_github()
 
     return redirect(url_for('index'))
@@ -416,6 +401,16 @@ def add_item():
 def delete_item(item_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    cursor.execute("SELECT file_url FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        try:
+            file_path = row[0].lstrip('/')
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"File delete error: {e}")
+            
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
