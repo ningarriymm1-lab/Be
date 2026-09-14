@@ -1,12 +1,16 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify, send_from_directory
 import sqlite3
 import os
 import base64
 import requests
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
 DB_NAME = 'storage.db'
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
@@ -55,22 +59,22 @@ def init_db():
     download_db_from_github()
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # สร้างตาราง items ถ้ายังไม่มี
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            description TEXT
+            description TEXT,
+            filename TEXT
         )
     ''')
     
-    # ตรวจสอบและเพิ่มคอลัมน์ description อัตโนมัติ กรณีที่ฐานข้อมูลเก่าไม่มีคอลัมน์นี้
     cursor.execute("PRAGMA table_info(items)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'description' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN description TEXT")
+    if 'filename' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN filename TEXT")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
@@ -78,7 +82,7 @@ def init_db():
             value TEXT
         )
     ''')
-    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลและอัปโหลด')")
     conn.commit()
     conn.close()
     upload_db_to_github()
@@ -158,8 +162,10 @@ HTML_TEMPLATE = '''
         .card-category { font-size: 10px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
         .card-desc { font-size: 12px; color: var(--text-sub); margin-bottom: 12px; word-break: break-word; flex: 1; }
 
-        .card-actions { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-top: auto; }
+        .card-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: auto; }
         .card-btn { padding: 6px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; width: 100%; }
+        .btn-download { background: rgba(129, 201, 149, 0.1); color: var(--success); }
+        .btn-download:hover { background: var(--success); color: #121212; }
         .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); }
         .btn-delete:hover { background: var(--danger); color: #121212; }
         
@@ -182,7 +188,7 @@ HTML_TEMPLATE = '''
 
     <div class="container">
         <header>
-            <h1>ระบบเก็บข้อมูล</h1>
+            <h1>ระบบเก็บข้อมูลและอัปโหลด</h1>
             <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
         </header>
 
@@ -191,13 +197,13 @@ HTML_TEMPLATE = '''
                 <div class="tabs">
                     <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
                     <button class="tab-btn" onclick="filterCategory('note', this)">📝 บันทึก</button>
-                    <button class="tab-btn" onclick="filterCategory('link', this)">🔗 ลิงก์</button>
+                    <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์</button>
                     <button class="tab-btn" onclick="filterCategory('other', this)">📌 อื่นๆ</button>
                 </div>
             </div>
             <div class="actions">
                 <input type="text" id="searchInput" class="search-box" placeholder="ค้นหาข้อมูล..." oninput="handleSearch()">
-                <button class="btn-primary" onclick="openModal()">+ เพิ่มข้อมูล</button>
+                <button class="btn-primary" onclick="openModal()">+ เพิ่มข้อมูล/อัปโหลด</button>
             </div>
         </div>
 
@@ -207,12 +213,15 @@ HTML_TEMPLATE = '''
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
                     {% if item.category == 'note' %}บันทึก
-                    {% elif item.category == 'link' %}ลิงก์
+                    {% elif item.category == 'file' %}ไฟล์
                     {% else %}อื่นๆ{% endif %}
                 </div>
                 <div class="card-desc">{{ item.description }}</div>
 
                 <div class="card-actions">
+                    {% if item.filename %}
+                    <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download">📥 ดาวน์โหลดไฟล์</a>
+                    {% endif %}
                     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="width: 100%; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
                         <button type="submit" class="card-btn btn-delete">ลบ</button>
                     </form>
@@ -225,8 +234,8 @@ HTML_TEMPLATE = '''
 
     <div class="modal" id="addModal">
         <div class="modal-content">
-            <h3>📌 เพิ่มข้อมูลใหม่</h3>
-            <form action="{{ url_for('add_item') }}" method="POST">
+            <h3>📌 เพิ่มข้อมูล / อัปโหลดไฟล์</h3>
+            <form action="{{ url_for('add_item') }}" method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label>หัวข้อ</label>
                     <input type="text" name="name" class="form-control" required placeholder="ชื่อหัวข้อ...">
@@ -234,14 +243,18 @@ HTML_TEMPLATE = '''
                 <div class="form-group">
                     <label>หมวดหมู่</label>
                     <select name="category" class="form-control">
-                        <option value="note">📝 บันทึก</option>
-                        <option value="link">🔗 ลิงก์</option>
+                        <option value="note">📝 บันทึกทั่วไป</option>
+                        <option value="file">📁 ไฟล์แนบ / อัปโหลด</option>
                         <option value="other">📌 อื่นๆ</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>รายละเอียด / ข้อมูล</label>
                     <textarea name="description" class="form-control" placeholder="พิมพ์รายละเอียดที่นี่..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>แนบไฟล์ (ถ้ามี)</label>
+                    <input type="file" name="file" class="form-control" style="padding: 6px;">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
@@ -306,10 +319,10 @@ def index():
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
     row = cursor.fetchone()
-    system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
+    system_title = row[0] if row else 'ระบบเก็บข้อมูลและอัปโหลด'
     
-    cursor.execute("SELECT id, name, category, description FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'description': r[3]} for r in cursor.fetchall()]
+    cursor.execute("SELECT id, name, category, description, filename FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'description': r[3], 'filename': r[4]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
@@ -318,21 +331,41 @@ def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
     description = request.form.get('description')
+    file = request.files.get('file')
+    
+    filename = None
+    if file and file.filename != '':
+        filename = secure_filename(file.filename)
+        # ป้องกันชื่อไฟล์ซ้ำด้วยการเติม id หรือ timestamp เล็กน้อยถ้าจำเป็น
+        base, ext = os.path.splitext(filename)
+        filename = f"{base}_{int(os.path.getmtime(DB_NAME) if os.path.exists(DB_NAME) else 0)}{ext}"
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
     
     if name:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, description) VALUES (?, ?, ?)", (name, category, description))
+        cursor.execute("INSERT INTO items (name, category, description, filename) VALUES (?, ?, ?, ?)", (name, category, description, filename))
         conn.commit()
         conn.close()
         upload_db_to_github()
 
     return redirect(url_for('index'))
 
+@app.route('/uploads/<filename>')
+def download_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    cursor.execute("SELECT filename FROM items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], row[0])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
