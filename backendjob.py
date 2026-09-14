@@ -13,7 +13,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนา
 DB_NAME = 'storage.db'
 
 # --- เก็บไฟล์บน Supabase Storage (คลาวด์ถาวร) แทนการเซฟลงดิสก์ของเซิร์ฟเวอร์ ---
-SUPABASE_URL = 'https://pcuxecmczaptvtfnemwk.supabase.co'
+SUPABASE_URL = 'https://pcuxecmczaptvtfnemwk.supabase.co/rest/v1/'
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjdXhlY21jemFwdHZ0Zm5lbXdrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTM3ODU0OSwiZXhwIjoyMTA0OTU0NTQ5fQ.L-rNALujmUoA3r2ItJKoX8AznXHGc0LrBYccvWNxRJ4'
 SUPABASE_BUCKET = 'uploads'
 
