@@ -6,6 +6,8 @@ import requests
 import uuid
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB ป้องกันเซิร์ฟเวอร์ล่ม
+
 DB_NAME = 'storage.db'
 UPLOAD_FOLDER = 'static/uploads'
 
@@ -19,7 +21,7 @@ def download_db_from_github():
     try:
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        res = requests.get(api_url, headers=headers, timeout=15)
+        res = requests.get(api_url, headers=headers, timeout=10)
         if res.status_code == 200:
             file_data = res.json()
             if 'content' in file_data:
@@ -36,7 +38,7 @@ def upload_db_to_github():
             return
         api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_NAME}"
         headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        res = requests.get(api_url, headers=headers, timeout=15)
+        res = requests.get(api_url, headers=headers, timeout=10)
         sha = res.json().get('sha') if res.status_code == 200 else None
         
         with open(DB_NAME, 'rb') as f:
@@ -51,7 +53,7 @@ def upload_db_to_github():
         if sha:
             payload["sha"] = sha
             
-        requests.put(api_url, headers=headers, json=payload, timeout=15)
+        requests.put(api_url, headers=headers, json=payload, timeout=10)
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการอัปโหลด DB: {e}")
 
@@ -317,7 +319,6 @@ init_db()
 
 @app.route('/')
 def index():
-    download_db_from_github()
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
