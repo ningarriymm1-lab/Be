@@ -1,16 +1,17 @@
-from flask import Flask, render_template_string, request, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify
 import sqlite3
 import os
 import base64
 import requests
-from werkzeug.utils import secure_filename
+import uuid
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # จำกัดขนาดไฟล์สูงสุด 500MB
 
 DB_NAME = 'storage.db'
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = 'static/uploads'
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'ningarriymm1-lab/Be')
@@ -27,6 +28,7 @@ def download_db_from_github():
                 file_bytes = base64.b64decode(file_data['content'])
                 with open(DB_NAME, 'wb') as f:
                     f.write(file_bytes)
+                print("ดาวน์โหลดฐานข้อมูลจาก GitHub สำเร็จ")
     except Exception as e:
         print(f"ไม่สามารถดาวน์โหลด DB ได้: {e}")
 
@@ -64,25 +66,16 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            description TEXT,
-            filename TEXT
+            file_url TEXT
         )
     ''')
-    
-    cursor.execute("PRAGMA table_info(items)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'description' not in columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN description TEXT")
-    if 'filename' not in columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN filename TEXT")
-
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
-    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลและอัปโหลด')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('system_title', 'ระบบเก็บข้อมูลของฉัน')")
     conn.commit()
     conn.close()
     upload_db_to_github()
@@ -100,7 +93,6 @@ HTML_TEMPLATE = '''
             --bg-main: #121212; --bg-card: #1E1F22; --bg-card-hover: #2B2D31;
             --text-main: #E3E3E3; --text-sub: #9E9E9E; --accent: #A4C8F0;
             --accent-hover: #8AB8EC; --border: #2D2F31; --danger: #F28B82;
-            --success: #81C995;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Noto Sans Thai', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); min-height: 100vh; padding: 15px; }
@@ -153,22 +145,20 @@ HTML_TEMPLATE = '''
 
         .card {
             background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-            padding: 12px; position: relative; transition: transform 0.2s, border-color 0.2s;
-            display: flex; flex-direction: column; align-items: flex-start; text-align: left;
+            padding: 10px; position: relative; transition: transform 0.2s, border-color 0.2s;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
             height: 100%; overflow: hidden;
         }
         .card:hover { transform: translateY(-3px); border-color: var(--accent); }
-        .card-title { font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-icon { font-size: 28px; margin-bottom: 6px; height: 40px; display: flex; align-items: center; justify-content: center; }
+        .card-title { font-size: 13px; font-weight: 500; color: var(--text-main); margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card-category { font-size: 10px; color: var(--text-sub); background: var(--bg-main); padding: 2px 6px; border-radius: 4px; margin-bottom: 8px; }
-        .card-desc { font-size: 12px; color: var(--text-sub); margin-bottom: 12px; word-break: break-word; flex: 1; }
-
-        .card-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: auto; }
-        .card-btn { padding: 6px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; width: 100%; }
-        .btn-download { background: rgba(129, 201, 149, 0.1); color: var(--success); }
-        .btn-download:hover { background: var(--success); color: #121212; }
-        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); }
+        .card-actions { display: flex; gap: 4px; width: 100%; margin-top: auto; }
+        .card-btn { padding: 5px 4px; border-radius: 6px; border: none; font-size: 11px; cursor: pointer; font-weight: 500; display: inline-block; text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .btn-download { background: rgba(164, 200, 240, 0.1); color: var(--accent); flex: 1; }
+        .btn-download:hover { background: var(--accent); color: #121212; }
+        .btn-delete { background: rgba(242, 139, 130, 0.1); color: var(--danger); flex: 1; }
         .btn-delete:hover { background: var(--danger); color: #121212; }
-        
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-sub); font-size: 14px; }
         
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); justify-content: center; align-items: center; z-index: 1000; padding: 15px; }
@@ -179,16 +169,31 @@ HTML_TEMPLATE = '''
         .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 5px; font-weight: 500; }
         .form-control { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); padding: 9px 12px; border-radius: 8px; font-size: 13px; outline: none; }
         .form-control:focus { border-color: var(--accent); }
-        textarea.form-control { resize: vertical; min-height: 80px; }
+        .file-drop-area { border: 2px dashed var(--border); border-radius: 10px; padding: 16px; text-align: center; background: var(--bg-main); cursor: pointer; position: relative; }
+        .file-drop-area input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .file-msg { font-size: 12px; color: var(--text-sub); pointer-events: none; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
         .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 13px; }
+        
+        /* หน้าต่างแสดงสถานะความคืบหน้าอัปโหลดแบบเรียลไทม์ */
+        #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; flex-direction: column; color: #fff; font-size: 15px; gap: 15px; }
+        .progress-container { width: 80%; max-width: 300px; background: var(--border); border-radius: 10px; overflow: hidden; height: 10px; }
+        .progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
     </style>
 </head>
 <body>
 
+    <div id="loadingOverlay">
+        <div style="font-weight: 600;" id="uploadStatusText">กำลังอัปโหลดไฟล์... 0%</div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-sub);">กำลังส่งข้อมูลด้วยความเร็วสูงสุด...</div>
+    </div>
+
     <div class="container">
         <header>
-            <h1>ระบบเก็บข้อมูลและอัปโหลด</h1>
+            <h1>ระบบเก็บข้อมูล</h1>
             <input type="text" id="systemTitleInput" class="editable-title" value="{{ system_title }}" placeholder="คลิกเพื่อพิมพ์ชื่อระบบของคุณ...">
         </header>
 
@@ -196,34 +201,37 @@ HTML_TEMPLATE = '''
             <div class="toolbar-left">
                 <div class="tabs">
                     <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
-                    <button class="tab-btn" onclick="filterCategory('note', this)">📝 บันทึก</button>
-                    <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์</button>
-                    <button class="tab-btn" onclick="filterCategory('other', this)">📌 อื่นๆ</button>
+                    <button class="tab-btn" onclick="filterCategory('file', this)">📁 ไฟล์ทั่วไป</button>
+                    <button class="tab-btn" onclick="filterCategory('zip', this)">📦 ซิป/โฟลเดอร์</button>
+                    <button class="tab-btn" onclick="filterCategory('image', this)">🖼️ รูปภาพ</button>
                 </div>
             </div>
             <div class="actions">
                 <input type="text" id="searchInput" class="search-box" placeholder="ค้นหาข้อมูล..." oninput="handleSearch()">
-                <button class="btn-primary" onclick="openModal()">+ เพิ่มข้อมูล/อัปโหลด</button>
+                <button class="btn-primary" onclick="openModal()">+ เพิ่มข้อมูล</button>
             </div>
         </div>
 
         <div class="grid-container" id="itemGrid">
             {% for item in items %}
             <div class="card item-card" data-category="{{ item.category }}" data-name="{{ item.name | lower }}">
+                <div class="card-icon">
+                    {% if item.category == 'image' %}🖼️
+                    {% elif item.category == 'zip' %}📦
+                    {% else %}📁{% endif %}
+                </div>
                 <div class="card-title" title="{{ item.name }}">{{ item.name }}</div>
                 <div class="card-category">
-                    {% if item.category == 'note' %}บันทึก
-                    {% elif item.category == 'file' %}ไฟล์
-                    {% else %}อื่นๆ{% endif %}
+                    {% if item.category == 'image' %}รูปภาพ
+                    {% elif item.category == 'zip' %}ซิป/โฟลเดอร์
+                    {% else %}ไฟล์ทั่วไป{% endif %}
                 </div>
-                <div class="card-desc">{{ item.description }}</div>
-
                 <div class="card-actions">
-                    {% if item.filename %}
-                    <a href="{{ url_for('download_file', filename=item.filename) }}" class="card-btn btn-download">📥 ดาวน์โหลดไฟล์</a>
+                    {% if item.file_url %}
+                        <a href="{{ item.file_url }}" class="card-btn btn-download" target="_blank">ดาวน์โหลด</a>
                     {% endif %}
-                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="width: 100%; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
-                        <button type="submit" class="card-btn btn-delete">ลบ</button>
+                    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="POST" style="flex: 1; display: flex;" onsubmit="return confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?');">
+                        <button type="submit" class="card-btn btn-delete" style="width: 100%;">ลบ</button>
                     </form>
                 </div>
             </div>
@@ -234,27 +242,26 @@ HTML_TEMPLATE = '''
 
     <div class="modal" id="addModal">
         <div class="modal-content">
-            <h3>📌 เพิ่มข้อมูล / อัปโหลดไฟล์</h3>
-            <form action="{{ url_for('add_item') }}" method="POST" enctype="multipart/form-data">
+            <h3>📦 เพิ่มไฟล์ / โฟลเดอร์</h3>
+            <form id="uploadForm" onsubmit="uploadFileWithProgress(event)">
                 <div class="form-group">
-                    <label>หัวข้อ</label>
-                    <input type="text" name="name" class="form-control" required placeholder="ชื่อหัวข้อ...">
+                    <label>ชื่อที่แสดง</label>
+                    <input type="text" name="name" id="itemName" class="form-control" required placeholder="ชื่อไฟล์...">
                 </div>
                 <div class="form-group">
                     <label>หมวดหมู่</label>
-                    <select name="category" class="form-control">
-                        <option value="note">📝 บันทึกทั่วไป</option>
-                        <option value="file">📁 ไฟล์แนบ / อัปโหลด</option>
-                        <option value="other">📌 อื่นๆ</option>
+                    <select name="category" id="itemCategory" class="form-control">
+                        <option value="file">📁 ไฟล์ทั่วไป</option>
+                        <option value="zip">📦 ไฟล์ซิป / โฟลเดอร์ (.zip, .rar)</option>
+                        <option value="image">🖼️ รูปภาพ</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>รายละเอียด / ข้อมูล</label>
-                    <textarea name="description" class="form-control" placeholder="พิมพ์รายละเอียดที่นี่..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>แนบไฟล์ (ถ้ามี)</label>
-                    <input type="file" name="file" class="form-control" style="padding: 6px;">
+                    <label>เลือกไฟล์จากเครื่อง</label>
+                    <div class="file-drop-area">
+                        <input type="file" name="file" id="fileInput" required onchange="handleFileSelect(this)">
+                        <div class="file-msg" id="fileMsg">📱 แตะที่นี่เพื่อเลือกไฟล์</div>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeModal()">ยกเลิก</button>
@@ -267,6 +274,46 @@ HTML_TEMPLATE = '''
     <script>
         let currentCategory = 'all';
 
+        // ระบบอัปโหลดผ่าน AJAX พร้อมแสดงแถบเปอร์เซ็นต์ความเร็วแบบเรียลไทม์
+        function uploadFileWithProgress(event) {
+            event.preventDefault();
+            const form = document.getElementById('uploadForm');
+            const formData = new FormData(form);
+            const overlay = document.getElementById('loadingOverlay');
+            const progressBar = document.getElementById('progressBar');
+            const statusText = document.getElementById('uploadStatusText');
+
+            overlay.style.display = 'flex';
+            progressBar.style.width = '0%';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', "{{ url_for('add_item') }}", true);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentComplete + '%';
+                    statusText.innerText = `กำลังอัปโหลดไฟล์... ${percentComplete}%`;
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    window.location.reload();
+                } else {
+                    alert('เกิดข้อผิดพลาดในการอัปโหลด กรุณาลองใหม่อีกครั้ง');
+                    overlay.style.display = 'none';
+                }
+            };
+
+            xhr.onerror = function() {
+                alert('การเชื่อมต่อขัดข้อง');
+                overlay.style.display = 'none';
+            };
+
+            xhr.send(formData);
+        }
+        
         const titleInput = document.getElementById('systemTitleInput');
         let timeout = null;
         titleInput.addEventListener('input', () => {
@@ -279,6 +326,20 @@ HTML_TEMPLATE = '''
                 });
             }, 500);
         });
+
+        function handleFileSelect(input) {
+            const fileMsg = document.getElementById('fileMsg');
+            const nameInput = document.getElementById('itemName');
+            const categorySelect = document.getElementById('itemCategory');
+            if (input.files && input.files.length > 0) {
+                const fileName = input.files[0].name;
+                const lowerName = fileName.toLowerCase();
+                fileMsg.innerHTML = `✅ เลือกแล้ว: <strong style="color: var(--accent);">${fileName}</strong>`;
+                if (lowerName.endsWith('.zip') || lowerName.endsWith('.rar')) categorySelect.value = 'zip';
+                else if (lowerName.match(/\.(jpg|jpeg|png|gif|webp)$/)) categorySelect.value = 'image';
+                if (!nameInput.value.trim()) nameInput.value = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+            }
+        }
 
         function filterCategory(category, btnElement) {
             currentCategory = category;
@@ -319,10 +380,10 @@ def index():
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = 'system_title'")
     row = cursor.fetchone()
-    system_title = row[0] if row else 'ระบบเก็บข้อมูลและอัปโหลด'
+    system_title = row[0] if row else 'ระบบเก็บข้อมูลของฉัน'
     
-    cursor.execute("SELECT id, name, category, description, filename FROM items ORDER BY id DESC")
-    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'description': r[3], 'filename': r[4]} for r in cursor.fetchall()]
+    cursor.execute("SELECT id, name, category, file_url FROM items ORDER BY id DESC")
+    items = [{'id': r[0], 'name': r[1], 'category': r[2], 'file_url': r[3]} for r in cursor.fetchall()]
     conn.close()
     return render_template_string(HTML_TEMPLATE, items=items, system_title=system_title)
 
@@ -330,41 +391,51 @@ def index():
 def add_item():
     name = request.form.get('name')
     category = request.form.get('category')
-    description = request.form.get('description')
     file = request.files.get('file')
     
-    filename = None
+    file_url = None
     if file and file.filename != '':
-        filename = secure_filename(file.filename)
-        # ป้องกันชื่อไฟล์ซ้ำด้วยการเติม id หรือ timestamp เล็กน้อยถ้าจำเป็น
-        base, ext = os.path.splitext(filename)
-        filename = f"{base}_{int(os.path.getmtime(DB_NAME) if os.path.exists(DB_NAME) else 0)}{ext}"
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-    
+        try:
+            original_filename = file.filename
+            ext = os.path.splitext(original_filename)[1]
+            unique_filename = f"{uuid.uuid4().hex}{ext}"
+            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+            
+            # ใช้ Buffer ขนาดใหญ่ (10MB) ในการบันทึกไฟล์ลงดิสก์เพื่อให้ความเร็วสูงสุด
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = file.stream.read(10 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    
+            file_url = f"/{file_path}"
+        except Exception as e:
+            print(f"Local save error: {e}")
+
     if name:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO items (name, category, description, filename) VALUES (?, ?, ?, ?)", (name, category, description, filename))
+        cursor.execute("INSERT INTO items (name, category, file_url) VALUES (?, ?, ?)", (name, category, file_url))
         conn.commit()
         conn.close()
         upload_db_to_github()
 
-    return redirect(url_for('index'))
-
-@app.route('/uploads/<filename>')
-def download_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return jsonify({'status': 'success'})
 
 @app.route('/delete/<int:item_id>', methods=['POST'])
 def delete_item(item_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT filename FROM items WHERE id = ?", (item_id,))
+    cursor.execute("SELECT file_url FROM items WHERE id = ?", (item_id,))
     row = cursor.fetchone()
     if row and row[0]:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], row[0])
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        try:
+            file_path = row[0].lstrip('/')
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"File delete error: {e}")
             
     cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
@@ -387,5 +458,4 @@ def update_title():
     return jsonify({'status': 'error'}), 400
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True, port=5000)
